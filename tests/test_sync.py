@@ -98,7 +98,7 @@ def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.Monkey
     assert linked[0].name.startswith("Lovelace2020_")
     assert linked[0].is_symlink()
 
-    note_link = notes_dir / "Lovelace2020.md"
+    note_link = notes_dir / "obsidian" / "Lovelace2020.md"
     assert note_link.is_symlink()
 
     bib_text = bib.read_text()
@@ -152,7 +152,7 @@ def test_main_sync_fallback_to_zotero_note(tmp_path: Path, monkeypatch: pytest.M
     sync.main()
 
     notes_dir = tmp_path / "references" / "notes"
-    note_file = notes_dir / "ZZ99YY88.md"
+    note_file = notes_dir / "zotero" / "ZZ99YY88.md"
     assert note_file.exists()
     text = note_file.read_text()
     assert "Imported from Zotero" in text

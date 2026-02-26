@@ -179,7 +179,7 @@ def main() -> None:
     # Obsidian index
     obsidian_index: dict[str, tuple[Path, str]] = {}
     if cfg["obsidian"]:
-        notes_dir.mkdir(parents=True, exist_ok=True)
+        (notes_dir / "obsidian").mkdir(parents=True, exist_ok=True)
         print("Scanning Obsidian notes...")
         obsidian_index = scan_obsidian_notes(cfg["obsidian"])
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
@@ -241,7 +241,7 @@ def main() -> None:
 
         # Note
         notes_dir.mkdir(parents=True, exist_ok=True)
-        note_dest = notes_dir / f"{cite_key}.md"
+        note_dest = notes_dir / "obsidian" / f"{cite_key}.md"
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked
         elif note_path:
@@ -252,6 +252,8 @@ def main() -> None:
             # Fallback: fetch note written directly in Zotero
             zotero_note = fetch_zotero_note(zot, zotero_key, cite_key)
             if zotero_note:
+                (notes_dir / "zotero").mkdir(parents=True, exist_ok=True)
+                note_dest = notes_dir / "zotero" / f"{cite_key}.md"
                 note_dest.write_text(zotero_note)
                 print(f"  [note] {cite_key}.md (zotero)")
                 notes_linked += 1
@@ -262,11 +264,12 @@ def main() -> None:
 
     # Link notes with zotero_key not matched to any collection item
     if cfg["obsidian"]:
-        already_linked = {p.resolve() for p in notes_dir.iterdir() if p.is_symlink()}
+        obsidian_dir = notes_dir / "obsidian"
+        already_linked = {p.resolve() for p in obsidian_dir.iterdir() if p.is_symlink()}
         for zk, (note_path, cite_key) in obsidian_index.items():
             if note_path.resolve() in already_linked:
                 continue
-            note_dest = notes_dir / f"{cite_key}.md"
+            note_dest = obsidian_dir / f"{cite_key}.md"
             if not (note_dest.exists() or note_dest.is_symlink()):
                 note_dest.symlink_to(note_path)
                 print(f"  [note] {cite_key}.md (zotero_key={zk}, not in collection)")

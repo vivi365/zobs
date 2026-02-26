@@ -177,9 +177,7 @@ def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
     ]
     if not matches:
         hint = "Use the 8-char collection ID (from the URL) or the exact name."
-        raise ValueError(
-            f"Collection '{name_or_key}' not found. {hint}"
-        )
+        raise ValueError(f"Collection '{name_or_key}' not found. {hint}")
     if len(matches) > 1:
         raise ValueError(
             f"Multiple collections named '{name_or_key}'. Use the 8-char key instead."

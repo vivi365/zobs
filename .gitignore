@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+dist/
+build/
+
+# uv / venv
+.venv
+uv.lock
+
+# Secrets
+.env

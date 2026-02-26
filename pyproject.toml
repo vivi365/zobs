@@ -11,20 +11,8 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "black>=24.0",
-    "pytest>=8.0",
-]
-
-[tool.black]
-line-length = 88
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
 [project.scripts]
-zobs = "zobs.sync:main"
+get-papers = "zobs.sync:main"
 
 [build-system]
 requires = ["hatchling"]

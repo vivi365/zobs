@@ -29,21 +29,26 @@ def load_config() -> dict:
     """Load and validate configuration from .env in the current working directory."""
     load_dotenv(Path.cwd() / ".env")
 
-    missing = [
-        k
-        for k in ("ZOTERO_USER_ID", "ZOTERO_API_KEY", "ZOTERO_COLLECTION")
-        if not os.environ.get(k)
-    ]
+    required = ("ZOTERO_USER_ID", "ZOTERO_API_KEY", "ZOTERO_COLLECTION")
+    raw_values = {k: os.environ.get(k) for k in required}
+    missing = []
+    for k, v in raw_values.items():
+        if not v or not v.strip():
+            missing.append(k)
+            continue
+        if v.lstrip().startswith("#"):
+            missing.append(k)
     if missing:
         print(f"[error] Missing required .env variables: {', '.join(missing)}")
         print("        Copy .env.example to .env and fill in your credentials.")
         sys.exit(1)
 
     obsidian_raw = os.environ.get("OBSIDIAN_NOTES")
+    obsidian_raw = obsidian_raw.strip() if obsidian_raw else None
     return {
-        "user_id": os.environ["ZOTERO_USER_ID"],
-        "api_key": os.environ["ZOTERO_API_KEY"],
-        "collection": os.environ["ZOTERO_COLLECTION"],
+        "user_id": raw_values["ZOTERO_USER_ID"].strip(),
+        "api_key": raw_values["ZOTERO_API_KEY"].strip(),
+        "collection": raw_values["ZOTERO_COLLECTION"].strip(),
         "storage": Path(
             os.environ.get("ZOTERO_STORAGE", Path.home() / "Zotero" / "storage")
         ),
@@ -171,9 +176,9 @@ def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
         c for c in collections if c["data"]["name"].lower() == name_or_key.lower()
     ]
     if not matches:
-        available = [c["data"]["name"] for c in collections]
+        hint = "Use the 8-char collection ID (from the URL) or the exact name."
         raise ValueError(
-            f"Collection '{name_or_key}' not found. Available: {available}"
+            f"Collection '{name_or_key}' not found. {hint}"
         )
     if len(matches) > 1:
         raise ValueError(
@@ -205,7 +210,11 @@ def main() -> None:
 
     # Zotero sync
     zot = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
-    collection_key = resolve_collection_key(zot, cfg["collection"])
+    try:
+        collection_key = resolve_collection_key(zot, cfg["collection"])
+    except ValueError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
     items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
 
     bib_entries = []

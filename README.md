@@ -19,11 +19,11 @@ Use the `.env.example` to create your `.env` config
 |---|---|---|
 | `ZOTERO_USER_ID` | yes | Numeric Zotero user ID (visible in your Zotero profile URL) |
 | `ZOTERO_API_KEY` | yes | Create at zotero.org/settings/keys |
-| `ZOTERO_COLLECTION` | yes | Collection name or 8-char key to sync |
+| `ZOTERO_COLLECTION` | yes | Collection name or 8-char key (ID) to sync |
 | `ZOTERO_STORAGE` | no | Path to Zotero local storage (default: `~/Zotero/storage`) |
 | `OBSIDIAN_NOTES` | no | Path to your Obsidian paper-summaries folder — see below |
 
-> API key and user ID are retrieved from [zotero.org/settings/keys](https://www.zotero.org/settings/keys). The collection id can be seen in the last part of URL in the Zotero web interface, e.g. `https://www.zotero.org/<username>/collections/<collection-id>/collection`
+> API key and user ID are retrieved from [zotero.org/settings/keys](https://www.zotero.org/settings/keys). The collection id can be seen in the last part of URL in the Zotero web interface, e.g. `https://www.zotero.org/<username>/collections/<collection-id>/collection` or simply use the plaintext leaf-level name.
 
 Sync pdfs and notes:
 ```bash

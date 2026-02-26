@@ -39,6 +39,18 @@ def test_resolve_collection_key() -> None:
     assert sync.resolve_collection_key(zot, "Papers") == "ZXCVBN12"
 
 
+def test_load_config_rejects_blank_required(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setenv("ZOTERO_API_KEY", "abc")
+    monkeypatch.setenv("ZOTERO_COLLECTION", "   ")
+
+    with pytest.raises(SystemExit):
+        sync.load_config()
+
+    out = capsys.readouterr().out
+    assert "Missing required .env variables" in out
+
+
 def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeZotero:
         def __init__(self, *args, **kwargs):

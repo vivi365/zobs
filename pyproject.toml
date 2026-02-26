@@ -20,7 +20,7 @@ dev = [
 testpaths = ["tests"]
 
 [project.scripts]
-get-papers = "zobs.sync:main"
+zobs = "zobs.sync:main"
 
 [build-system]
 requires = ["hatchling"]

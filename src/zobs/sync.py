@@ -18,7 +18,7 @@ import sys
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
-from pyzotero import zotero
+from pyzotero import zotero, errors as zotero_errors
 
 # Config
 
@@ -104,7 +104,11 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
             skipped += 1
             continue
 
-        fm = parse_frontmatter(text)
+        try:
+            fm = parse_frontmatter(text)
+        except yaml.YAMLError:
+            print(f"  [warn] invalid frontmatter, skipped: {note}")
+            continue
         cite_key = fm.get("citekey")
         zotero_key = fm.get("zotero_key")
         if cite_key and zotero_key:
@@ -171,7 +175,10 @@ def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
     """Accept either a collection name or 8-char key; return the key."""
     if len(name_or_key) == 8 and name_or_key.isalnum():
         return name_or_key
-    collections = zot.collections()
+    try:
+        collections = zot.collections()
+    except zotero_errors.HTTPError as e:
+        raise RuntimeError(f"Zotero API error while listing collections: {e}") from e
     matches = [
         c for c in collections if c["data"]["name"].lower() == name_or_key.lower()
     ]
@@ -213,7 +220,16 @@ def main() -> None:
     except ValueError as e:
         print(f"[error] {e}")
         sys.exit(1)
-    items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
+    except RuntimeError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
+
+    try:
+        items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
+    except zotero_errors.HTTPError as e:
+        print("[error] Zotero API error while fetching collection items.")
+        print(f"        {e}")
+        sys.exit(1)
 
     bib_entries = []
     synced, migrated, skipped = 0, 0, 0

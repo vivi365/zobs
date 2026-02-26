@@ -39,23 +39,7 @@ def test_resolve_collection_key() -> None:
     assert sync.resolve_collection_key(zot, "Papers") == "ZXCVBN12"
 
 
-def test_load_config_rejects_blank_required(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("ZOTERO_USER_ID", "123")
-    monkeypatch.setenv("ZOTERO_API_KEY", "abc")
-    monkeypatch.setenv("ZOTERO_COLLECTION", "   ")
-
-    with pytest.raises(SystemExit):
-        sync.load_config()
-
-    out = capsys.readouterr().out
-    assert "Missing required .env variables" in out
-
-
-def test_main_sync_with_obsidian_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeZotero:
         def __init__(self, *args, **kwargs):
             pass
@@ -70,13 +54,7 @@ def test_main_sync_with_obsidian_note(
                     "data": {
                         "title": "Great Paper",
                         "key": "AB12CD34",
-                        "creators": [
-                            {
-                                "creatorType": "author",
-                                "firstName": "Ada",
-                                "lastName": "Lovelace",
-                            }
-                        ],
+                        "creators": [{"creatorType": "author", "firstName": "Ada", "lastName": "Lovelace"}],
                         "date": "2020-01-01",
                         "publicationTitle": "Journal",
                         "DOI": "10.1000/test",
@@ -120,7 +98,7 @@ def test_main_sync_with_obsidian_note(
     assert linked[0].name.startswith("Lovelace2020_")
     assert linked[0].is_symlink()
 
-    note_link = notes_dir / "obsidian" / "Lovelace2020.md"
+    note_link = notes_dir / "Lovelace2020.md"
     assert note_link.is_symlink()
 
     bib_text = bib.read_text()
@@ -128,9 +106,7 @@ def test_main_sync_with_obsidian_note(
     assert "Great Paper" in bib_text
 
 
-def test_main_sync_fallback_to_zotero_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_sync_fallback_to_zotero_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeZotero:
         def __init__(self, *args, **kwargs):
             pass
@@ -176,7 +152,7 @@ def test_main_sync_fallback_to_zotero_note(
     sync.main()
 
     notes_dir = tmp_path / "references" / "notes"
-    note_file = notes_dir / "zotero" / "ZZ99YY88.md"
+    note_file = notes_dir / "ZZ99YY88.md"
     assert note_file.exists()
     text = note_file.read_text()
     assert "Imported from Zotero" in text

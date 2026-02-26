@@ -240,6 +240,7 @@ def main() -> None:
                 skipped += 1
 
         # Note
+        notes_dir.mkdir(parents=True, exist_ok=True)
         note_dest = notes_dir / f"{cite_key}.md"
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked

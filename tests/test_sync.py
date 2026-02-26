@@ -39,7 +39,9 @@ def test_resolve_collection_key() -> None:
     assert sync.resolve_collection_key(zot, "Papers") == "ZXCVBN12"
 
 
-def test_load_config_rejects_blank_required(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_load_config_rejects_blank_required(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setenv("ZOTERO_USER_ID", "123")
     monkeypatch.setenv("ZOTERO_API_KEY", "abc")
     monkeypatch.setenv("ZOTERO_COLLECTION", "   ")
@@ -51,7 +53,9 @@ def test_load_config_rejects_blank_required(monkeypatch: pytest.MonkeyPatch, cap
     assert "Missing required .env variables" in out
 
 
-def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_sync_with_obsidian_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class FakeZotero:
         def __init__(self, *args, **kwargs):
             pass
@@ -66,7 +70,13 @@ def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.Monkey
                     "data": {
                         "title": "Great Paper",
                         "key": "AB12CD34",
-                        "creators": [{"creatorType": "author", "firstName": "Ada", "lastName": "Lovelace"}],
+                        "creators": [
+                            {
+                                "creatorType": "author",
+                                "firstName": "Ada",
+                                "lastName": "Lovelace",
+                            }
+                        ],
                         "date": "2020-01-01",
                         "publicationTitle": "Journal",
                         "DOI": "10.1000/test",
@@ -118,7 +128,9 @@ def test_main_sync_with_obsidian_note(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "Great Paper" in bib_text
 
 
-def test_main_sync_fallback_to_zotero_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_sync_fallback_to_zotero_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class FakeZotero:
         def __init__(self, *args, **kwargs):
             pass

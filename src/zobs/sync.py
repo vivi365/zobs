@@ -20,7 +20,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pyzotero import zotero
 
-
 # Config
 
 ITEM_TYPES = "journalArticle || conferencePaper || preprint || report"
@@ -30,8 +29,11 @@ def load_config() -> dict:
     """Load and validate configuration from .env in the current working directory."""
     load_dotenv(Path.cwd() / ".env")
 
-    missing = [k for k in ("ZOTERO_USER_ID", "ZOTERO_API_KEY", "ZOTERO_COLLECTION")
-               if not os.environ.get(k)]
+    missing = [
+        k
+        for k in ("ZOTERO_USER_ID", "ZOTERO_API_KEY", "ZOTERO_COLLECTION")
+        if not os.environ.get(k)
+    ]
     if missing:
         print(f"[error] Missing required .env variables: {', '.join(missing)}")
         print("        Copy .env.example to .env and fill in your credentials.")
@@ -39,15 +41,18 @@ def load_config() -> dict:
 
     obsidian_raw = os.environ.get("OBSIDIAN_NOTES")
     return {
-        "user_id":    os.environ["ZOTERO_USER_ID"],
-        "api_key":    os.environ["ZOTERO_API_KEY"],
+        "user_id": os.environ["ZOTERO_USER_ID"],
+        "api_key": os.environ["ZOTERO_API_KEY"],
         "collection": os.environ["ZOTERO_COLLECTION"],
-        "storage":    Path(os.environ.get("ZOTERO_STORAGE", Path.home() / "Zotero" / "storage")),
-        "obsidian":   Path(obsidian_raw) if obsidian_raw else None,
+        "storage": Path(
+            os.environ.get("ZOTERO_STORAGE", Path.home() / "Zotero" / "storage")
+        ),
+        "obsidian": Path(obsidian_raw) if obsidian_raw else None,
     }
 
 
 # Helpers
+
 
 def slugify(title: str) -> str:
     """Make a filename-safe slug from a title."""
@@ -79,7 +84,9 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
     """
     if not notes_root.exists():
         print(f"[error] OBSIDIAN_NOTES not accessible: {notes_root}")
-        print("        Grant Full Disk Access to Terminal in System Settings → Privacy & Security.")
+        print(
+            "        Grant Full Disk Access to Terminal in System Settings → Privacy & Security."
+        )
         sys.exit(1)
 
     index: dict[str, tuple[Path, str]] = {}
@@ -93,7 +100,7 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
             continue
 
         fm = parse_frontmatter(text)
-        cite_key   = fm.get("citekey")
+        cite_key = fm.get("citekey")
         zotero_key = fm.get("zotero_key")
         if cite_key and zotero_key:
             index[str(zotero_key)] = (note, str(cite_key))
@@ -107,6 +114,7 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
 def html_to_text(html: str) -> str:
     """Strip HTML tags for basic Zotero note content."""
     import re
+
     text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
@@ -134,10 +142,14 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
     """Build a minimal BibTeX entry from a Zotero item."""
     data = item["data"]
     authors = data.get("creators", [])
-    author_str = " and ".join(
-        f"{a.get('lastName', '')}, {a.get('firstName', '')}"
-        for a in authors if a.get("creatorType") == "author"
-    ) or "Unknown"
+    author_str = (
+        " and ".join(
+            f"{a.get('lastName', '')}, {a.get('firstName', '')}"
+            for a in authors
+            if a.get("creatorType") == "author"
+        )
+        or "Unknown"
+    )
     year = (data.get("date") or "")[:4]
     return (
         f"@article{{{cite_key},\n"
@@ -155,24 +167,31 @@ def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
     if len(name_or_key) == 8 and name_or_key.isalnum():
         return name_or_key
     collections = zot.collections()
-    matches = [c for c in collections if c["data"]["name"].lower() == name_or_key.lower()]
+    matches = [
+        c for c in collections if c["data"]["name"].lower() == name_or_key.lower()
+    ]
     if not matches:
         available = [c["data"]["name"] for c in collections]
-        raise ValueError(f"Collection '{name_or_key}' not found. Available: {available}")
+        raise ValueError(
+            f"Collection '{name_or_key}' not found. Available: {available}"
+        )
     if len(matches) > 1:
-        raise ValueError(f"Multiple collections named '{name_or_key}'. Use the 8-char key instead.")
+        raise ValueError(
+            f"Multiple collections named '{name_or_key}'. Use the 8-char key instead."
+        )
     return matches[0]["data"]["key"]
 
 
 # Main
 
+
 def main() -> None:
     cfg = load_config()
 
-    repo_root  = Path.cwd()
+    repo_root = Path.cwd()
     papers_dir = repo_root / "references" / "papers"
-    notes_dir  = repo_root / "references" / "notes"
-    bib_file   = repo_root / "references" / "refs.bib"
+    notes_dir = repo_root / "references" / "notes"
+    bib_file = repo_root / "references" / "refs.bib"
 
     papers_dir.mkdir(parents=True, exist_ok=True)
 
@@ -194,15 +213,15 @@ def main() -> None:
     notes_linked, notes_missing = 0, 0
 
     for item in items:
-        data       = item["data"]
-        title      = data.get("title", "untitled")
+        data = item["data"]
+        title = data.get("title", "untitled")
         zotero_key = data.get("key")
 
         note_path, cite_key = obsidian_index.get(zotero_key, (None, zotero_key))
 
         slug_title = slugify(title)
-        dest       = papers_dir / f"{cite_key}_{slug_title}.pdf"
-        old_dest   = papers_dir / f"{zotero_key}_{slug_title}.pdf"
+        dest = papers_dir / f"{cite_key}_{slug_title}.pdf"
+        old_dest = papers_dir / f"{zotero_key}_{slug_title}.pdf"
 
         # ── PDF ───────────────────────────────────────────────────────────────
         try:
@@ -213,7 +232,11 @@ def main() -> None:
             continue
 
         pdf = next(
-            (a for a in attachments if a["data"].get("contentType") == "application/pdf"),
+            (
+                a
+                for a in attachments
+                if a["data"].get("contentType") == "application/pdf"
+            ),
             None,
         )
 
@@ -228,9 +251,9 @@ def main() -> None:
             print(f"  [migr] {old_dest.name} -> {dest.name}")
             migrated += 1
         else:
-            att_key   = pdf["data"]["key"]
+            att_key = pdf["data"]["key"]
             local_dir = cfg["storage"] / att_key
-            pdfs      = list(local_dir.glob("*.pdf")) if local_dir.exists() else []
+            pdfs = list(local_dir.glob("*.pdf")) if local_dir.exists() else []
             if pdfs:
                 dest.symlink_to(pdfs[0])
                 print(f"  [link] {dest.name}")
@@ -278,4 +301,6 @@ def main() -> None:
     bib_file.write_text("\n".join(bib_entries))
 
     notes_summary = f", {notes_linked} notes linked, {notes_missing} no note"
-    print(f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped{notes_summary}. refs.bib updated ({len(bib_entries)} entries).")
+    print(
+        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
+    )

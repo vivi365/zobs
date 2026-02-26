@@ -12,9 +12,8 @@ Syncs a specific Zotero collection to your local project with optional Obsidian 
 uv add zobs
 ```
 
-```bash
-cp .env.example .env   # fill with your configs and keys
-```
+Use the `.env.example` to create your `.env` config
+
 
 | Variable | Required | Description |
 |---|---|---|
@@ -28,7 +27,7 @@ cp .env.example .env   # fill with your configs and keys
 
 Sync pdfs and notes:
 ```bash
-uv run get-papers
+uv run zobs
 ```
 
 ---
@@ -37,12 +36,12 @@ uv run get-papers
 
 Without `OBSIDIAN_NOTES`, the package still works: PDFs sync, `refs.bib` is
 generated using raw 8-char Zotero keys as citekeys, and any notes written
-directly in Zotero (child notes on items) are exported to `references/notes/`.
+directly in Zotero (child notes on items) are exported to `references/notes/zotero/`.
 
 With `OBSIDIAN_NOTES`, the package additionally:
 
 - Reads citekeys from your Obsidian notes (Better BibTeX author-year format)
-- Symlinks matching notes into `references/notes/`
+- Symlinks matching notes into `references/notes/obsidian/`
 
 ### Required Obsidian plugin
 
@@ -85,4 +84,4 @@ the notes and this connects those to your writing/experiment workspace. Symlinks
 2. `uv add zobs`
 3. Copy `.env.example`, fill in credentials
 4. Add `references/papers/`, `references/notes/`, `.env` to `.gitignore`
-5. `uv run get-papers`
+5. `uv run zobs`

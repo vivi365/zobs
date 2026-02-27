@@ -171,6 +171,21 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
     )
 
 
+def citation_key_from_item(data: dict, zotero_key: str) -> str:
+    """Prefer Better BibTeX citation key when present; fallback to Zotero key."""
+    cite_key = data.get("citationKey")
+    if cite_key:
+        return str(cite_key)
+    extra = str(data.get("extra", ""))
+    for line in extra.splitlines():
+        if ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        if label.strip().lower() == "citation key" and value.strip():
+            return value.strip()
+    return zotero_key
+
+
 def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
     """Accept either a collection name or 8-char key; return the key."""
     if len(name_or_key) == 8 and name_or_key.isalnum():
@@ -245,7 +260,8 @@ def main() -> None:
         title = data.get("title", "untitled")
         zotero_key = data.get("key")
 
-        note_path, cite_key = obsidian_index.get(zotero_key, (None, zotero_key))
+        note_path, note_cite_key = obsidian_index.get(zotero_key, (None, None))
+        cite_key = note_cite_key or citation_key_from_item(data, zotero_key)
         if note_path:
             collection_obsidian_targets.add(note_path.resolve())
 

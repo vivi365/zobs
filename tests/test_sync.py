@@ -53,6 +53,17 @@ def test_load_config_rejects_blank_required(
     assert "Missing required .env variables" in out
 
 
+def test_citation_key_from_item_prefers_bbt_then_extra_then_fallback() -> None:
+    data = {"citationKey": "ZeroRootCauseAnalyses"}
+    assert sync.citation_key_from_item(data, "AB12CD34") == "ZeroRootCauseAnalyses"
+
+    data = {"extra": "Citation Key: FromExtra\nOther: Value"}
+    assert sync.citation_key_from_item(data, "AB12CD34") == "FromExtra"
+
+    data = {"extra": "Other: Value"}
+    assert sync.citation_key_from_item(data, "AB12CD34") == "AB12CD34"
+
+
 def test_main_sync_with_obsidian_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

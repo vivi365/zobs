@@ -22,7 +22,7 @@ from pyzotero import zotero, errors as zotero_errors
 
 # Config
 
-ITEM_TYPES = "journalArticle || conferencePaper || preprint || report"
+ITEM_TYPES = "journalArticle || conferencePaper || preprint || report || webpage"
 
 
 def load_config() -> dict:
@@ -279,14 +279,16 @@ def main() -> None:
             bib_entries.append(build_bib_entry(item, cite_key))
             continue
 
-        pdf = next(
-            (
-                a
-                for a in attachments
-                if a["data"].get("contentType") == "application/pdf"
-            ),
-            None,
-        )
+        def is_pdf_attachment(att: dict) -> bool:
+            data = att.get("data", {})
+            content_type = str(data.get("contentType", "")).lower()
+            filename = str(data.get("filename", "")).lower()
+            return content_type in {
+                "application/pdf",
+                "application/x-pdf",
+            } or filename.endswith(".pdf")
+
+        pdf = next((a for a in attachments if is_pdf_attachment(a)), None)
 
         if pdf is None:
             print(f"  [skip] no PDF: {title[:60]}")

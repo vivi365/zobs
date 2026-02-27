@@ -204,11 +204,13 @@ def main() -> None:
     bib_file = repo_root / "references" / "refs.bib"
 
     papers_dir.mkdir(parents=True, exist_ok=True)
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    obsidian_dir = notes_dir / "obsidian"
 
     # Obsidian index
     obsidian_index: dict[str, tuple[Path, str]] = {}
     if cfg["obsidian"]:
-        (notes_dir / "obsidian").mkdir(parents=True, exist_ok=True)
+        obsidian_dir.mkdir(parents=True, exist_ok=True)
         print("Scanning Obsidian notes...")
         obsidian_index = scan_obsidian_notes(cfg["obsidian"])
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
@@ -286,11 +288,11 @@ def main() -> None:
                 skipped += 1
 
         # Note
-        notes_dir.mkdir(parents=True, exist_ok=True)
-        note_dest = notes_dir / "obsidian" / f"{cite_key}.md"
+        note_dest = obsidian_dir / f"{cite_key}.md"
         if note_dest.is_symlink() and not note_dest.exists():
             note_dest.unlink()  # broken symlink — target was deleted
             print(f"  [unlink] {cite_key}.md (target deleted)")
+            notes_unlinked += 1
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked
         elif note_path:
@@ -313,11 +315,11 @@ def main() -> None:
 
     # Link notes with zotero_key not matched to any collection item
     if cfg["obsidian"]:
-        obsidian_dir = notes_dir / "obsidian"
-        indexed_targets = {note_path.resolve() for note_path, _ in obsidian_index.values()}
+        indexed_targets = {
+            note_path.resolve() for note_path, _ in obsidian_index.values()
+        }
 
         # Remove stale symlinks — target deleted (broken) or no longer in obsidian_index
-        notes_unlinked = 0
         for link in obsidian_dir.iterdir():
             if not link.is_symlink():
                 continue

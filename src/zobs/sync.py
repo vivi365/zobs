@@ -233,7 +233,7 @@ def main() -> None:
 
     bib_entries = []
     synced, migrated, skipped = 0, 0, 0
-    notes_linked, notes_missing = 0, 0
+    notes_linked, notes_unlinked, notes_missing = 0, 0, 0
 
     for item in items:
         data = item["data"]
@@ -288,6 +288,9 @@ def main() -> None:
         # Note
         notes_dir.mkdir(parents=True, exist_ok=True)
         note_dest = notes_dir / "obsidian" / f"{cite_key}.md"
+        if note_dest.is_symlink() and not note_dest.exists():
+            note_dest.unlink()  # broken symlink — target was deleted
+            print(f"  [unlink] {cite_key}.md (target deleted)")
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked
         elif note_path:
@@ -311,6 +314,18 @@ def main() -> None:
     # Link notes with zotero_key not matched to any collection item
     if cfg["obsidian"]:
         obsidian_dir = notes_dir / "obsidian"
+        indexed_targets = {note_path.resolve() for note_path, _ in obsidian_index.values()}
+
+        # Remove stale symlinks — target deleted (broken) or no longer in obsidian_index
+        notes_unlinked = 0
+        for link in obsidian_dir.iterdir():
+            if not link.is_symlink():
+                continue
+            if not link.exists() or link.resolve() not in indexed_targets:
+                link.unlink()
+                print(f"  [unlink] {link.name} (note removed or de-indexed)")
+                notes_unlinked += 1
+
         already_linked = {p.resolve() for p in obsidian_dir.iterdir() if p.is_symlink()}
         for zk, (note_path, cite_key) in obsidian_index.items():
             if note_path.resolve() in already_linked:
@@ -323,7 +338,7 @@ def main() -> None:
 
     bib_file.write_text("\n".join(bib_entries))
 
-    notes_summary = f", {notes_linked} notes linked, {notes_missing} no note"
+    notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
     print(
         f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
     )

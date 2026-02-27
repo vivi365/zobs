@@ -236,6 +236,9 @@ def main() -> None:
     bib_entries = []
     synced, migrated, skipped = 0, 0, 0
     notes_linked, notes_unlinked, notes_missing = 0, 0, 0
+    expected_pdfs: set[str] = set()
+    expected_zotero_notes: set[str] = set()
+    collection_obsidian_targets: set[Path] = set()
 
     for item in items:
         data = item["data"]
@@ -243,10 +246,14 @@ def main() -> None:
         zotero_key = data.get("key")
 
         note_path, cite_key = obsidian_index.get(zotero_key, (None, zotero_key))
+        if note_path:
+            collection_obsidian_targets.add(note_path.resolve())
 
         slug_title = slugify(title)
         dest = papers_dir / f"{cite_key}_{slug_title}.pdf"
         old_dest = papers_dir / f"{zotero_key}_{slug_title}.pdf"
+        expected_pdfs.add(dest.name)
+        expected_zotero_notes.add(f"{cite_key}.md")
 
         # ── PDF ───────────────────────────────────────────────────────────────
         try:
@@ -289,10 +296,6 @@ def main() -> None:
 
         # Note
         note_dest = obsidian_dir / f"{cite_key}.md"
-        if note_dest.is_symlink() and not note_dest.exists():
-            note_dest.unlink()  # broken symlink — target was deleted
-            print(f"  [unlink] {cite_key}.md (target deleted)")
-            notes_unlinked += 1
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked
         elif note_path:
@@ -313,34 +316,35 @@ def main() -> None:
 
         bib_entries.append(build_bib_entry(item, cite_key))
 
-    # Link notes with zotero_key not matched to any collection item
-    if cfg["obsidian"]:
-        indexed_targets = {
-            note_path.resolve() for note_path, _ in obsidian_index.values()
-        }
+    # Remove PDFs and Zotero notes no longer in the collection
+    pdfs_unlinked = 0
+    for link in papers_dir.iterdir():
+        if link.is_symlink() and link.name not in expected_pdfs:
+            link.unlink()
+            print(f"  [unlink] {link.name} (not in collection)")
+            pdfs_unlinked += 1
 
-        # Remove stale symlinks — target deleted (broken) or no longer in obsidian_index
+    zotero_notes_dir = notes_dir / "zotero"
+    if zotero_notes_dir.exists():
+        for f in zotero_notes_dir.iterdir():
+            if f.name not in expected_zotero_notes:
+                f.unlink()
+                print(f"  [unlink] {f.name} (not in collection)")
+                notes_unlinked += 1
+
+    # Remove Obsidian symlinks not belonging to the current collection
+    if cfg["obsidian"]:
         for link in obsidian_dir.iterdir():
             if not link.is_symlink():
                 continue
-            if not link.exists() or link.resolve() not in indexed_targets:
+            if not link.exists() or link.resolve() not in collection_obsidian_targets:
                 link.unlink()
-                print(f"  [unlink] {link.name} (note removed or de-indexed)")
+                print(f"  [unlink] {link.name} (not in collection)")
                 notes_unlinked += 1
-
-        already_linked = {p.resolve() for p in obsidian_dir.iterdir() if p.is_symlink()}
-        for zk, (note_path, cite_key) in obsidian_index.items():
-            if note_path.resolve() in already_linked:
-                continue
-            note_dest = obsidian_dir / f"{cite_key}.md"
-            if not (note_dest.exists() or note_dest.is_symlink()):
-                note_dest.symlink_to(note_path)
-                print(f"  [note] {cite_key}.md (zotero_key={zk}, not in collection)")
-                notes_linked += 1
 
     bib_file.write_text("\n".join(bib_entries))
 
     notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
     print(
-        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
+        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
     )

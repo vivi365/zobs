@@ -128,6 +128,135 @@ def test_main_sync_with_obsidian_note(
     assert "Great Paper" in bib_text
 
 
+def _fake_zotero(item_key: str, title: str, attach_key: str):
+    """Build a minimal FakeZotero class for a single-item collection."""
+
+    class Fake:
+        def __init__(self, *a, **kw):
+            pass
+
+        def collections(self):
+            return []
+
+        def collection_items(self, coll, itemType=None):
+            return [
+                {
+                    "data": {
+                        "title": title,
+                        "key": item_key,
+                        "creators": [],
+                        "date": "2020",
+                        "publicationTitle": "",
+                        "DOI": "",
+                    }
+                }
+            ]
+
+        def children(self, key, itemType=None):
+            if itemType == "attachment":
+                return [{"data": {"contentType": "application/pdf", "key": attach_key}}]
+            return []
+
+    return Fake
+
+
+def test_cleanup_removes_stale_symlinks_on_collection_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Switching collection removes old PDFs and Obsidian note symlinks."""
+    storage = tmp_path / "Zotero" / "storage"
+    for key, fname in [("ATCHA001", "a.pdf"), ("ATCHB001", "b.pdf")]:
+        (storage / key).mkdir(parents=True)
+        (storage / key / fname).write_text("pdf")
+
+    notes_root = tmp_path / "obsidian"
+    notes_root.mkdir()
+    (notes_root / "note_a.md").write_text(
+        "---\ncitekey: AuthorA2020\nzotero_key: AAAAAAAA\n---\n"
+    )
+    (notes_root / "note_b.md").write_text(
+        "---\ncitekey: AuthorB2021\nzotero_key: BBBBBBBB\n---\n"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setenv("ZOTERO_API_KEY", "abc")
+    monkeypatch.setenv("ZOTERO_STORAGE", str(storage))
+    monkeypatch.setenv("OBSIDIAN_NOTES", str(notes_root))
+
+    papers_dir = tmp_path / "references" / "papers"
+    obsidian_dir = tmp_path / "references" / "notes" / "obsidian"
+
+    # Run 1: collection A
+    monkeypatch.setenv("ZOTERO_COLLECTION", "AAAAAAAA")
+    monkeypatch.setattr(
+        sync.zotero, "Zotero", _fake_zotero("AAAAAAAA", "Paper A", "ATCHA001")
+    )
+    sync.main()
+
+    assert any(p.name.startswith("AuthorA2020_") for p in papers_dir.iterdir())
+    assert (obsidian_dir / "AuthorA2020.md").is_symlink()
+
+    # Run 2: collection B — A's artefacts should be gone
+    monkeypatch.setenv("ZOTERO_COLLECTION", "BBBBBBBB")
+    monkeypatch.setattr(
+        sync.zotero, "Zotero", _fake_zotero("BBBBBBBB", "Paper B", "ATCHB001")
+    )
+    sync.main()
+
+    pdf_names = [p.name for p in papers_dir.iterdir()]
+    assert not any(
+        n.startswith("AuthorA2020_") for n in pdf_names
+    ), "stale PDF not removed"
+    assert any(n.startswith("AuthorB2021_") for n in pdf_names), "new PDF not linked"
+    assert not (
+        obsidian_dir / "AuthorA2020.md"
+    ).exists(), "stale note symlink not removed"
+    assert (obsidian_dir / "AuthorB2021.md").is_symlink(), "new note not linked"
+
+
+def test_cleanup_removes_broken_symlink_when_obsidian_note_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting an Obsidian note removes its dangling symlink on the next run."""
+    storage = tmp_path / "Zotero" / "storage" / "ATCHA001"
+    storage.mkdir(parents=True)
+    (storage / "a.pdf").write_text("pdf")
+
+    notes_root = tmp_path / "obsidian"
+    notes_root.mkdir()
+    note = notes_root / "note_a.md"
+    note.write_text("---\ncitekey: AuthorA2020\nzotero_key: AAAAAAAA\n---\n")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setenv("ZOTERO_API_KEY", "abc")
+    monkeypatch.setenv("ZOTERO_COLLECTION", "AAAAAAAA")
+    monkeypatch.setenv("ZOTERO_STORAGE", str(tmp_path / "Zotero" / "storage"))
+    monkeypatch.setenv("OBSIDIAN_NOTES", str(notes_root))
+    monkeypatch.setattr(
+        sync.zotero, "Zotero", _fake_zotero("AAAAAAAA", "Paper A", "ATCHA001")
+    )
+
+    sync.main()
+
+    obsidian_dir = tmp_path / "references" / "notes" / "obsidian"
+    assert (obsidian_dir / "AuthorA2020.md").is_symlink()
+
+    # Delete the source note — symlink becomes dangling
+    note.unlink()
+    assert not (obsidian_dir / "AuthorA2020.md").exists()  # confirm it's broken
+
+    sync.main()
+
+    assert not (
+        obsidian_dir / "AuthorA2020.md"
+    ).exists(), "broken symlink not cleaned up"
+    assert not (
+        obsidian_dir / "AuthorA2020.md"
+    ).is_symlink(), "dangling symlink still present"
+
+
 def test_main_sync_fallback_to_zotero_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

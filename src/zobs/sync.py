@@ -18,11 +18,11 @@ import sys
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
-from pyzotero import zotero
+from pyzotero import zotero, errors as zotero_errors
 
 # Config
 
-ITEM_TYPES = "journalArticle || conferencePaper || preprint || report"
+ITEM_TYPES = "journalArticle || conferencePaper || preprint || report || webpage"
 
 
 def load_config() -> dict:
@@ -104,7 +104,11 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
             skipped += 1
             continue
 
-        fm = parse_frontmatter(text)
+        try:
+            fm = parse_frontmatter(text)
+        except yaml.YAMLError:
+            print(f"  [warn] invalid frontmatter, skipped: {note}")
+            continue
         cite_key = fm.get("citekey")
         zotero_key = fm.get("zotero_key")
         if cite_key and zotero_key:
@@ -167,11 +171,29 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
     )
 
 
+def citation_key_from_item(data: dict, zotero_key: str) -> str:
+    """Prefer Better BibTeX citation key when present; fallback to Zotero key."""
+    cite_key = data.get("citationKey")
+    if cite_key:
+        return str(cite_key)
+    extra = str(data.get("extra", ""))
+    for line in extra.splitlines():
+        if ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        if label.strip().lower() == "citation key" and value.strip():
+            return value.strip()
+    return zotero_key
+
+
 def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
     """Accept either a collection name or 8-char key; return the key."""
     if len(name_or_key) == 8 and name_or_key.isalnum():
         return name_or_key
-    collections = zot.collections()
+    try:
+        collections = zot.collections()
+    except zotero_errors.HTTPError as e:
+        raise RuntimeError(f"Zotero API error while listing collections: {e}") from e
     matches = [
         c for c in collections if c["data"]["name"].lower() == name_or_key.lower()
     ]
@@ -197,11 +219,13 @@ def main() -> None:
     bib_file = repo_root / "references" / "refs.bib"
 
     papers_dir.mkdir(parents=True, exist_ok=True)
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    obsidian_dir = notes_dir / "obsidian"
 
     # Obsidian index
     obsidian_index: dict[str, tuple[Path, str]] = {}
     if cfg["obsidian"]:
-        (notes_dir / "obsidian").mkdir(parents=True, exist_ok=True)
+        obsidian_dir.mkdir(parents=True, exist_ok=True)
         print("Scanning Obsidian notes...")
         obsidian_index = scan_obsidian_notes(cfg["obsidian"])
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
@@ -213,22 +237,39 @@ def main() -> None:
     except ValueError as e:
         print(f"[error] {e}")
         sys.exit(1)
-    items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
+    except RuntimeError as e:
+        print(f"[error] {e}")
+        sys.exit(1)
+
+    try:
+        items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
+    except zotero_errors.HTTPError as e:
+        print("[error] Zotero API error while fetching collection items.")
+        print(f"        {e}")
+        sys.exit(1)
 
     bib_entries = []
     synced, migrated, skipped = 0, 0, 0
-    notes_linked, notes_missing = 0, 0
+    notes_linked, notes_unlinked, notes_missing = 0, 0, 0
+    expected_pdfs: set[str] = set()
+    expected_zotero_notes: set[str] = set()
+    collection_obsidian_targets: set[Path] = set()
 
     for item in items:
         data = item["data"]
         title = data.get("title", "untitled")
         zotero_key = data.get("key")
 
-        note_path, cite_key = obsidian_index.get(zotero_key, (None, zotero_key))
+        note_path, note_cite_key = obsidian_index.get(zotero_key, (None, None))
+        cite_key = note_cite_key or citation_key_from_item(data, zotero_key)
+        if note_path:
+            collection_obsidian_targets.add(note_path.resolve())
 
         slug_title = slugify(title)
         dest = papers_dir / f"{cite_key}_{slug_title}.pdf"
         old_dest = papers_dir / f"{zotero_key}_{slug_title}.pdf"
+        expected_pdfs.add(dest.name)
+        expected_zotero_notes.add(f"{cite_key}.md")
 
         # ── PDF ───────────────────────────────────────────────────────────────
         try:
@@ -238,14 +279,16 @@ def main() -> None:
             bib_entries.append(build_bib_entry(item, cite_key))
             continue
 
-        pdf = next(
-            (
-                a
-                for a in attachments
-                if a["data"].get("contentType") == "application/pdf"
-            ),
-            None,
-        )
+        def is_pdf_attachment(att: dict) -> bool:
+            data = att.get("data", {})
+            content_type = str(data.get("contentType", "")).lower()
+            filename = str(data.get("filename", "")).lower()
+            return content_type in {
+                "application/pdf",
+                "application/x-pdf",
+            } or filename.endswith(".pdf")
+
+        pdf = next((a for a in attachments if is_pdf_attachment(a)), None)
 
         if pdf is None:
             print(f"  [skip] no PDF: {title[:60]}")
@@ -270,8 +313,7 @@ def main() -> None:
                 skipped += 1
 
         # Note
-        notes_dir.mkdir(parents=True, exist_ok=True)
-        note_dest = notes_dir / "obsidian" / f"{cite_key}.md"
+        note_dest = obsidian_dir / f"{cite_key}.md"
         if note_dest.exists() or note_dest.is_symlink():
             pass  # already linked
         elif note_path:
@@ -292,22 +334,35 @@ def main() -> None:
 
         bib_entries.append(build_bib_entry(item, cite_key))
 
-    # Link notes with zotero_key not matched to any collection item
+    # Remove PDFs and Zotero notes no longer in the collection
+    pdfs_unlinked = 0
+    for link in papers_dir.iterdir():
+        if link.is_symlink() and link.name not in expected_pdfs:
+            link.unlink()
+            print(f"  [unlink] {link.name} (not in collection)")
+            pdfs_unlinked += 1
+
+    zotero_notes_dir = notes_dir / "zotero"
+    if zotero_notes_dir.exists():
+        for f in zotero_notes_dir.iterdir():
+            if f.name not in expected_zotero_notes:
+                f.unlink()
+                print(f"  [unlink] {f.name} (not in collection)")
+                notes_unlinked += 1
+
+    # Remove Obsidian symlinks not belonging to the current collection
     if cfg["obsidian"]:
-        obsidian_dir = notes_dir / "obsidian"
-        already_linked = {p.resolve() for p in obsidian_dir.iterdir() if p.is_symlink()}
-        for zk, (note_path, cite_key) in obsidian_index.items():
-            if note_path.resolve() in already_linked:
+        for link in obsidian_dir.iterdir():
+            if not link.is_symlink():
                 continue
-            note_dest = obsidian_dir / f"{cite_key}.md"
-            if not (note_dest.exists() or note_dest.is_symlink()):
-                note_dest.symlink_to(note_path)
-                print(f"  [note] {cite_key}.md (zotero_key={zk}, not in collection)")
-                notes_linked += 1
+            if not link.exists() or link.resolve() not in collection_obsidian_targets:
+                link.unlink()
+                print(f"  [unlink] {link.name} (not in collection)")
+                notes_unlinked += 1
 
     bib_file.write_text("\n".join(bib_entries))
 
-    notes_summary = f", {notes_linked} notes linked, {notes_missing} no note"
+    notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
     print(
-        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
+        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
     )

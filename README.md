@@ -1,10 +1,10 @@
 # zobs
 
-Syncs a specific Zotero collection to your local project with optional Obsidian notes syncing.
+Sync a Zotero collection and Obsidian notes into your project workspace.
 
 - Symlinks PDFs from local Zotero storage into `references/papers/`
 - Generates `references/refs.bib`
-- Links paper notes into `references/notes/` (from Obsidian, or Zotero's built-in notes as fallback)
+- Links paper notes into `references/notes/` (from Obsidian, or Zotero's built-in notes)
 
 ## Setup and Usage
 

@@ -151,9 +151,16 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
     """Build a minimal BibTeX entry from a Zotero item."""
     data = item["data"]
     authors = data.get("creators", [])
+    def fmt_author(a: dict) -> str:
+        last = a.get("lastName", "")
+        first = a.get("firstName", "")
+        if first:
+            return f"{last}, {first}"
+        return f"{{{last}}}"
+
     author_str = (
         " and ".join(
-            f"{a.get('lastName', '')}, {a.get('firstName', '')}"
+            fmt_author(a)
             for a in authors
             if a.get("creatorType") == "author"
         )

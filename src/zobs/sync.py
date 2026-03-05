@@ -12,11 +12,14 @@ Configuration (via .env in the project root):
     ZOTERO_COLLECTION — collection name or 8-char key (mode=collection)
     ZOTERO_TAG        — tag name or comma-separated list (mode=tag)
     ZOTERO_STORAGE    — path to Zotero storage dir (default: ~/Zotero/storage)
+    ZOTERO_BBT_URL    — Better BibTeX local export URL (optional)
     OBSIDIAN_NOTES    — path to Obsidian paper-summaries folder (optional)
 """
 
 import os
 import sys
+import urllib.error
+import urllib.request
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
@@ -56,6 +59,8 @@ def load_config() -> dict:
 
     obsidian_raw = os.environ.get("OBSIDIAN_NOTES")
     obsidian_raw = obsidian_raw.strip() if obsidian_raw else None
+    bbt_url_raw = os.environ.get("ZOTERO_BBT_URL")
+    bbt_url_raw = bbt_url_raw.strip() if bbt_url_raw else None
     return {
         "user_id": raw_values["ZOTERO_USER_ID"].strip(),
         "api_key": raw_values["ZOTERO_API_KEY"].strip(),
@@ -64,6 +69,7 @@ def load_config() -> dict:
             os.environ.get("ZOTERO_STORAGE", Path.home() / "Zotero" / "storage")
         ),
         "obsidian": Path(obsidian_raw) if obsidian_raw else None,
+        "bbt_url": bbt_url_raw,
     }
 
 
@@ -158,6 +164,17 @@ def fetch_zotero_note(zot: zotero.Zotero, zotero_key: str, cite_key: str) -> str
     return f"# {cite_key}\n\n*Imported from Zotero*\n\n{html_to_text(content)}\n"
 
 
+def fetch_bbt_bib(url: str) -> str:
+    """Fetch a Better BibTeX export from the local HTTP endpoint."""
+    req = urllib.request.Request(url, headers={"User-Agent": "zobs/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            charset = resp.headers.get_content_charset() or "utf-8"
+            return resp.read().decode(charset)
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Better BibTeX export failed: {e}") from e
+
+
 def build_bib_entry(item: dict, cite_key: str) -> str:
     """Build a minimal BibTeX entry from a Zotero item."""
     data = item["data"]
@@ -175,13 +192,34 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
         or "Unknown"
     )
     year = (data.get("date") or "")[:4]
+    item_type = (data.get("itemType") or "").strip()
+    title = data.get("title", "")
+    doi = data.get("DOI", "")
+
+    if item_type == "conferencePaper":
+        booktitle = (
+            data.get("proceedingsTitle")
+            or data.get("conferenceName")
+            or data.get("publicationTitle")
+            or ""
+        )
+        return (
+            f"@inproceedings{{{cite_key},\n"
+            f"  title     = {{{title}}},\n"
+            f"  author    = {{{author_str}}},\n"
+            f"  booktitle = {{{booktitle}}},\n"
+            f"  year      = {{{year}}},\n"
+            f"  doi       = {{{doi}}},\n"
+            f"}}\n"
+        )
+
     return (
         f"@article{{{cite_key},\n"
-        f"  title   = {{{data.get('title', '')}}},\n"
+        f"  title   = {{{title}}},\n"
         f"  author  = {{{author_str}}},\n"
         f"  year    = {{{year}}},\n"
         f"  journal = {{{data.get('publicationTitle', '')}}},\n"
-        f"  doi     = {{{data.get('DOI', '')}}},\n"
+        f"  doi     = {{{doi}}},\n"
         f"}}\n"
     )
 
@@ -239,7 +277,7 @@ def main() -> None:
         print(f"        {e}")
         sys.exit(1)
 
-    bib_entries = []
+    bib_entries: list[str] = []
     synced, migrated, skipped = 0, 0, 0
     notes_linked, notes_unlinked, notes_missing = 0, 0, 0
     expected_pdfs: set[str] = set()
@@ -267,7 +305,8 @@ def main() -> None:
             attachments = zot.children(zotero_key, itemType="attachment")
         except Exception as e:
             print(f"  [err]  API error for {zotero_key}: {e}")
-            bib_entries.append(build_bib_entry(item, cite_key))
+            if not cfg["bbt_url"]:
+                bib_entries.append(build_bib_entry(item, cite_key))
             continue
 
         def is_pdf_attachment(att: dict) -> bool:
@@ -323,7 +362,8 @@ def main() -> None:
             else:
                 notes_missing += 1
 
-        bib_entries.append(build_bib_entry(item, cite_key))
+        if not cfg["bbt_url"]:
+            bib_entries.append(build_bib_entry(item, cite_key))
 
     # Remove PDFs and Zotero notes no longer in the selection
     pdfs_unlinked = 0
@@ -351,9 +391,17 @@ def main() -> None:
                 print(f"  [unlink] {link.name} (not in selection)")
                 notes_unlinked += 1
 
-    bib_file.write_text("\n".join(bib_entries))
+    if cfg["bbt_url"]:
+        bib_text = fetch_bbt_bib(cfg["bbt_url"])
+        bib_file.write_text(bib_text)
+        bib_summary = "refs.bib updated (Better BibTeX export)."
+    else:
+        bib_file.write_text("\n".join(bib_entries))
+        bib_summary = f"refs.bib updated ({len(bib_entries)} entries)."
 
-    notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
+    notes_summary = (
+        f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
+    )
     print(
-        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
+        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. {bib_summary}"
     )

@@ -22,7 +22,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pyzotero import zotero, errors as zotero_errors
 
-from zobs.selector import SelectorError, parse_selector
+from zobs.selector import SelectorError, ZoteroClient, parse_selector
 
 # Config
 
@@ -162,6 +162,7 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
     """Build a minimal BibTeX entry from a Zotero item."""
     data = item["data"]
     authors = data.get("creators", [])
+
     def fmt_author(a: dict) -> str:
         last = a.get("lastName", "")
         first = a.get("firstName", "")
@@ -170,11 +171,7 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
         return f"{{{last}}}"
 
     author_str = (
-        " and ".join(
-            fmt_author(a)
-            for a in authors
-            if a.get("creatorType") == "author"
-        )
+        " and ".join(fmt_author(a) for a in authors if a.get("creatorType") == "author")
         or "Unknown"
     )
     year = (data.get("date") or "")[:4]
@@ -228,7 +225,7 @@ def main() -> None:
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
 
     # Zotero sync
-    zot = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
+    zot: ZoteroClient = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
     try:
         items = cfg["selector"].fetch_items(zot, ITEM_TYPES)
     except ValueError as e:

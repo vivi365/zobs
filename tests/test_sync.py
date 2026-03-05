@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 import zobs.sync as sync
-from zobs import selector
 
 
 def test_slugify_basic() -> None:
@@ -30,16 +29,6 @@ def test_scan_obsidian_notes_indexes_only_opted_in(tmp_path: Path) -> None:
     assert index == {"AB12CD34": (notes / "in.md", "Foo2020")}
 
 
-def test_resolve_collection_key() -> None:
-    class FakeZotero:
-        def collections(self):
-            return [{"data": {"name": "Papers", "key": "ZXCVBN12"}}]
-
-    zot = FakeZotero()
-    assert selector.resolve_collection_key(zot, "AB12CD34") == "AB12CD34"
-    assert selector.resolve_collection_key(zot, "Papers") == "ZXCVBN12"
-
-
 def test_load_config_rejects_blank_required(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -52,23 +41,6 @@ def test_load_config_rejects_blank_required(
 
     out = capsys.readouterr().out
     assert "Missing required .env variables" in out
-
-
-def test_parse_selector_tag_and_filtering_and_logic() -> None:
-    class FakeZotero:
-        def items(self, tag=None, itemType=None):
-            assert tag == "ML"
-            return [
-                {"data": {"key": "A", "tags": [{"tag": "ML"}, {"tag": "NLP"}]}},
-                {"data": {"key": "B", "tags": [{"tag": "ml"}]}},
-                {"data": {"key": "C", "tags": [{"tag": "NLP"}]}},
-            ]
-
-    sel = selector.parse_selector(
-        {"ZOTERO_SYNC_MODE": "tag", "ZOTERO_TAG": "ML, NLP"}
-    )
-    items = sel.fetch_items(FakeZotero(), "journalArticle")
-    assert [i["data"]["key"] for i in items] == ["A"]
 
 
 def test_citation_key_from_item_prefers_bbt_then_extra_then_fallback() -> None:

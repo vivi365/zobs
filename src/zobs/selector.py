@@ -16,8 +16,24 @@ class SelectorError(ValueError):
         self.missing = missing or []
 
 
+class ZoteroClient(Protocol):
+    def collections(self) -> list[dict]:
+        raise NotImplementedError
+
+    def collection_items(
+        self, collection_key: str, itemType: str | None = None
+    ) -> list[dict]:
+        raise NotImplementedError
+
+    def items(self, tag: str | None = None, itemType: str | None = None) -> list[dict]:
+        raise NotImplementedError
+
+    def children(self, zotero_key: str, itemType: str | None = None) -> list[dict]:
+        raise NotImplementedError
+
+
 class ItemSelector(Protocol):
-    def fetch_items(self, zot, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
         raise NotImplementedError
 
 
@@ -55,7 +71,7 @@ def parse_selector(env: Mapping[str, str | None]) -> ItemSelector:
     return TagSelector(tags=tags)
 
 
-def resolve_collection_key(zot, name_or_key: str) -> str:
+def resolve_collection_key(zot: ZoteroClient, name_or_key: str) -> str:
     """Accept either a collection name or 8-char key; return the key."""
     if len(name_or_key) == 8 and name_or_key.isalnum():
         return name_or_key
@@ -80,7 +96,7 @@ def resolve_collection_key(zot, name_or_key: str) -> str:
 class CollectionSelector:
     name_or_key: str
 
-    def fetch_items(self, zot, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
         collection_key = resolve_collection_key(zot, self.name_or_key)
         return zot.collection_items(collection_key, itemType=item_types)
 
@@ -89,7 +105,7 @@ class CollectionSelector:
 class TagSelector:
     tags: list[str]
 
-    def fetch_items(self, zot, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
         tags_lower = [t.lower() for t in self.tags]
         first = self.tags[0]
         items = zot.items(tag=first, itemType=item_types)

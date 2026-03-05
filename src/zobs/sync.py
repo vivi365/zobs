@@ -8,17 +8,24 @@ stored in each note's frontmatter.
 Configuration (via .env in the project root):
     ZOTERO_USER_ID    — numeric Zotero user ID
     ZOTERO_API_KEY    — Zotero API key
-    ZOTERO_COLLECTION — collection name or 8-char key
+    ZOTERO_SYNC_MODE  — selection mode: collection (default) or tag
+    ZOTERO_COLLECTION — collection name or 8-char key (mode=collection)
+    ZOTERO_TAG        — tag name or comma-separated list (mode=tag)
     ZOTERO_STORAGE    — path to Zotero storage dir (default: ~/Zotero/storage)
+    ZOTERO_BBT_URL    — Better BibTeX local export URL (optional)
     OBSIDIAN_NOTES    — path to Obsidian paper-summaries folder (optional)
 """
 
 import os
 import sys
+import urllib.error
+import urllib.request
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 from pyzotero import zotero, errors as zotero_errors
+
+from zobs.selector import SelectorError, ZoteroClient, parse_selector
 
 # Config
 
@@ -29,7 +36,7 @@ def load_config() -> dict:
     """Load and validate configuration from .env in the current working directory."""
     load_dotenv(Path.cwd() / ".env")
 
-    required = ("ZOTERO_USER_ID", "ZOTERO_API_KEY", "ZOTERO_COLLECTION")
+    required = ("ZOTERO_USER_ID", "ZOTERO_API_KEY")
     raw_values = {k: os.environ.get(k) for k in required}
     missing = []
     for k, v in raw_values.items():
@@ -43,16 +50,26 @@ def load_config() -> dict:
         print("        Copy .env.example to .env and fill in your credentials.")
         sys.exit(1)
 
+    try:
+        selector = parse_selector(os.environ)
+    except SelectorError as e:
+        print(f"[error] {e}")
+        print("        Copy .env.example to .env and fill in your credentials.")
+        sys.exit(1)
+
     obsidian_raw = os.environ.get("OBSIDIAN_NOTES")
     obsidian_raw = obsidian_raw.strip() if obsidian_raw else None
+    bbt_url_raw = os.environ.get("ZOTERO_BBT_URL")
+    bbt_url_raw = bbt_url_raw.strip() if bbt_url_raw else None
     return {
         "user_id": raw_values["ZOTERO_USER_ID"].strip(),
         "api_key": raw_values["ZOTERO_API_KEY"].strip(),
-        "collection": raw_values["ZOTERO_COLLECTION"].strip(),
+        "selector": selector,
         "storage": Path(
             os.environ.get("ZOTERO_STORAGE", Path.home() / "Zotero" / "storage")
         ),
         "obsidian": Path(obsidian_raw) if obsidian_raw else None,
+        "bbt_url": bbt_url_raw,
     }
 
 
@@ -147,10 +164,22 @@ def fetch_zotero_note(zot: zotero.Zotero, zotero_key: str, cite_key: str) -> str
     return f"# {cite_key}\n\n*Imported from Zotero*\n\n{html_to_text(content)}\n"
 
 
+def fetch_bbt_bib(url: str) -> str:
+    """Fetch a Better BibTeX export from the local HTTP endpoint."""
+    req = urllib.request.Request(url, headers={"User-Agent": "zobs/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            charset = resp.headers.get_content_charset() or "utf-8"
+            return resp.read().decode(charset)
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Better BibTeX export failed: {e}") from e
+
+
 def build_bib_entry(item: dict, cite_key: str) -> str:
     """Build a minimal BibTeX entry from a Zotero item."""
     data = item["data"]
     authors = data.get("creators", [])
+
     def fmt_author(a: dict) -> str:
         last = a.get("lastName", "")
         first = a.get("firstName", "")
@@ -159,21 +188,38 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
         return f"{{{last}}}"
 
     author_str = (
-        " and ".join(
-            fmt_author(a)
-            for a in authors
-            if a.get("creatorType") == "author"
-        )
+        " and ".join(fmt_author(a) for a in authors if a.get("creatorType") == "author")
         or "Unknown"
     )
     year = (data.get("date") or "")[:4]
+    item_type = (data.get("itemType") or "").strip()
+    title = data.get("title", "")
+    doi = data.get("DOI", "")
+
+    if item_type == "conferencePaper":
+        booktitle = (
+            data.get("proceedingsTitle")
+            or data.get("conferenceName")
+            or data.get("publicationTitle")
+            or ""
+        )
+        return (
+            f"@inproceedings{{{cite_key},\n"
+            f"  title     = {{{title}}},\n"
+            f"  author    = {{{author_str}}},\n"
+            f"  booktitle = {{{booktitle}}},\n"
+            f"  year      = {{{year}}},\n"
+            f"  doi       = {{{doi}}},\n"
+            f"}}\n"
+        )
+
     return (
         f"@article{{{cite_key},\n"
-        f"  title   = {{{data.get('title', '')}}},\n"
+        f"  title   = {{{title}}},\n"
         f"  author  = {{{author_str}}},\n"
         f"  year    = {{{year}}},\n"
         f"  journal = {{{data.get('publicationTitle', '')}}},\n"
-        f"  doi     = {{{data.get('DOI', '')}}},\n"
+        f"  doi     = {{{doi}}},\n"
         f"}}\n"
     )
 
@@ -191,27 +237,6 @@ def citation_key_from_item(data: dict, zotero_key: str) -> str:
         if label.strip().lower() == "citation key" and value.strip():
             return value.strip()
     return zotero_key
-
-
-def resolve_collection_key(zot: zotero.Zotero, name_or_key: str) -> str:
-    """Accept either a collection name or 8-char key; return the key."""
-    if len(name_or_key) == 8 and name_or_key.isalnum():
-        return name_or_key
-    try:
-        collections = zot.collections()
-    except zotero_errors.HTTPError as e:
-        raise RuntimeError(f"Zotero API error while listing collections: {e}") from e
-    matches = [
-        c for c in collections if c["data"]["name"].lower() == name_or_key.lower()
-    ]
-    if not matches:
-        hint = "Use the 8-char collection ID (from the URL) or the exact name."
-        raise ValueError(f"Collection '{name_or_key}' not found. {hint}")
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple collections named '{name_or_key}'. Use the 8-char key instead."
-        )
-    return matches[0]["data"]["key"]
 
 
 # Main
@@ -238,29 +263,26 @@ def main() -> None:
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
 
     # Zotero sync
-    zot = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
+    zot: ZoteroClient = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
     try:
-        collection_key = resolve_collection_key(zot, cfg["collection"])
+        items = cfg["selector"].fetch_items(zot, ITEM_TYPES)
     except ValueError as e:
         print(f"[error] {e}")
         sys.exit(1)
     except RuntimeError as e:
         print(f"[error] {e}")
         sys.exit(1)
-
-    try:
-        items = zot.collection_items(collection_key, itemType=ITEM_TYPES)
     except zotero_errors.HTTPError as e:
-        print("[error] Zotero API error while fetching collection items.")
+        print("[error] Zotero API error while fetching items.")
         print(f"        {e}")
         sys.exit(1)
 
-    bib_entries = []
+    bib_entries: list[str] = []
     synced, migrated, skipped = 0, 0, 0
     notes_linked, notes_unlinked, notes_missing = 0, 0, 0
     expected_pdfs: set[str] = set()
     expected_zotero_notes: set[str] = set()
-    collection_obsidian_targets: set[Path] = set()
+    selection_obsidian_targets: set[Path] = set()
 
     for item in items:
         data = item["data"]
@@ -270,7 +292,7 @@ def main() -> None:
         note_path, note_cite_key = obsidian_index.get(zotero_key, (None, None))
         cite_key = note_cite_key or citation_key_from_item(data, zotero_key)
         if note_path:
-            collection_obsidian_targets.add(note_path.resolve())
+            selection_obsidian_targets.add(note_path.resolve())
 
         slug_title = slugify(title)
         dest = papers_dir / f"{cite_key}_{slug_title}.pdf"
@@ -283,7 +305,8 @@ def main() -> None:
             attachments = zot.children(zotero_key, itemType="attachment")
         except Exception as e:
             print(f"  [err]  API error for {zotero_key}: {e}")
-            bib_entries.append(build_bib_entry(item, cite_key))
+            if not cfg["bbt_url"]:
+                bib_entries.append(build_bib_entry(item, cite_key))
             continue
 
         def is_pdf_attachment(att: dict) -> bool:
@@ -339,14 +362,15 @@ def main() -> None:
             else:
                 notes_missing += 1
 
-        bib_entries.append(build_bib_entry(item, cite_key))
+        if not cfg["bbt_url"]:
+            bib_entries.append(build_bib_entry(item, cite_key))
 
-    # Remove PDFs and Zotero notes no longer in the collection
+    # Remove PDFs and Zotero notes no longer in the selection
     pdfs_unlinked = 0
     for link in papers_dir.iterdir():
         if link.is_symlink() and link.name not in expected_pdfs:
             link.unlink()
-            print(f"  [unlink] {link.name} (not in collection)")
+            print(f"  [unlink] {link.name} (not in selection)")
             pdfs_unlinked += 1
 
     zotero_notes_dir = notes_dir / "zotero"
@@ -354,22 +378,30 @@ def main() -> None:
         for f in zotero_notes_dir.iterdir():
             if f.name not in expected_zotero_notes:
                 f.unlink()
-                print(f"  [unlink] {f.name} (not in collection)")
+                print(f"  [unlink] {f.name} (not in selection)")
                 notes_unlinked += 1
 
-    # Remove Obsidian symlinks not belonging to the current collection
+    # Remove Obsidian symlinks not belonging to the current selection
     if cfg["obsidian"]:
         for link in obsidian_dir.iterdir():
             if not link.is_symlink():
                 continue
-            if not link.exists() or link.resolve() not in collection_obsidian_targets:
+            if not link.exists() or link.resolve() not in selection_obsidian_targets:
                 link.unlink()
-                print(f"  [unlink] {link.name} (not in collection)")
+                print(f"  [unlink] {link.name} (not in selection)")
                 notes_unlinked += 1
 
-    bib_file.write_text("\n".join(bib_entries))
+    if cfg["bbt_url"]:
+        bib_text = fetch_bbt_bib(cfg["bbt_url"])
+        bib_file.write_text(bib_text)
+        bib_summary = "refs.bib updated (Better BibTeX export)."
+    else:
+        bib_file.write_text("\n".join(bib_entries))
+        bib_summary = f"refs.bib updated ({len(bib_entries)} entries)."
 
-    notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
+    notes_summary = (
+        f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
+    )
     print(
-        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. refs.bib updated ({len(bib_entries)} entries)."
+        f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. {bib_summary}"
     )

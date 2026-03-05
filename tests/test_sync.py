@@ -29,16 +29,6 @@ def test_scan_obsidian_notes_indexes_only_opted_in(tmp_path: Path) -> None:
     assert index == {"AB12CD34": (notes / "in.md", "Foo2020")}
 
 
-def test_resolve_collection_key() -> None:
-    class FakeZotero:
-        def collections(self):
-            return [{"data": {"name": "Papers", "key": "ZXCVBN12"}}]
-
-    zot = FakeZotero()
-    assert sync.resolve_collection_key(zot, "AB12CD34") == "AB12CD34"
-    assert sync.resolve_collection_key(zot, "Papers") == "ZXCVBN12"
-
-
 def test_load_config_rejects_blank_required(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

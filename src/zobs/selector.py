@@ -31,9 +31,18 @@ class ZoteroClient(Protocol):
     def children(self, zotero_key: str, itemType: str | None = None) -> list[dict]:
         raise NotImplementedError
 
+    def everything(self, result: list[dict]) -> list[dict]:
+        raise NotImplementedError
+
+
+# A selection resolves to the top-level items to sync, plus a
+# parent-key -> child-items map (attachments and notes). Children are
+# fetched in bulk rather than one API round-trip per item.
+FetchResult = tuple[list[dict], dict[str, list[dict]]]
+
 
 class ItemSelector(Protocol):
-    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> FetchResult:
         raise NotImplementedError
 
 
@@ -92,31 +101,68 @@ def resolve_collection_key(zot: ZoteroClient, name_or_key: str) -> str:
     return matches[0]["data"]["key"]
 
 
+def _group_children(items: list[dict]) -> dict[str, list[dict]]:
+    """Group child items (attachments, notes) by their parent item key."""
+    children: dict[str, list[dict]] = {}
+    for it in items:
+        parent = it.get("data", {}).get("parentItem")
+        if parent:
+            children.setdefault(str(parent), []).append(it)
+    return children
+
+
+def _wanted_types(item_types: str) -> set[str]:
+    """Parse the Zotero ``itemType`` query string into a set of type names."""
+    return {t.strip() for t in item_types.split("||") if t.strip()}
+
+
 @dataclass(frozen=True)
 class CollectionSelector:
     name_or_key: str
 
-    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> FetchResult:
         collection_key = resolve_collection_key(zot, self.name_or_key)
-        return zot.collection_items(collection_key, itemType=item_types)
+        # A collection listing includes child items, so one paginated fetch
+        # returns the top-level items and all their attachments/notes.
+        all_items = zot.everything(zot.collection_items(collection_key))
+        wanted = _wanted_types(item_types)
+        top = [
+            it
+            for it in all_items
+            if not it.get("data", {}).get("parentItem")
+            and it.get("data", {}).get("itemType") in wanted
+        ]
+        return top, _group_children(all_items)
 
 
 @dataclass(frozen=True)
 class TagSelector:
     tags: list[str]
 
-    def fetch_items(self, zot: ZoteroClient, item_types: str) -> list[dict]:
+    def fetch_items(self, zot: ZoteroClient, item_types: str) -> FetchResult:
         tags_lower = [t.lower() for t in self.tags]
         first = self.tags[0]
-        items = zot.items(tag=first, itemType=item_types)
-        if len(tags_lower) == 1:
-            return items
+        items = zot.everything(zot.items(tag=first, itemType=item_types))
 
-        def has_all_tags(item: dict) -> bool:
-            item_tags = {
-                str(t.get("tag", "")).lower()
-                for t in item.get("data", {}).get("tags", [])
-            }
-            return all(t in item_tags for t in tags_lower)
+        if len(tags_lower) > 1:
 
-        return [item for item in items if has_all_tags(item)]
+            def has_all_tags(item: dict) -> bool:
+                item_tags = {
+                    str(t.get("tag", "")).lower()
+                    for t in item.get("data", {}).get("tags", [])
+                }
+                return all(t in item_tags for t in tags_lower)
+
+            items = [item for item in items if has_all_tags(item)]
+
+        # Child items don't carry the parent's tags, so there's no tag query
+        # for them. Sweep the library's attachments and notes once and keep
+        # those whose parent is in the selection.
+        selected = {it.get("data", {}).get("key") for it in items}
+        child_items = zot.everything(zot.items(itemType="attachment || note"))
+        children = {
+            parent: kids
+            for parent, kids in _group_children(child_items).items()
+            if parent in selected
+        }
+        return items, children

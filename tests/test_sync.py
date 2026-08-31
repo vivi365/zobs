@@ -71,6 +71,7 @@ def test_main_sync_with_obsidian_note(
                     "data": {
                         "title": "Great Paper",
                         "key": "AB12CD34",
+                        "itemType": "journalArticle",
                         "creators": [
                             {
                                 "creatorType": "author",
@@ -82,15 +83,19 @@ def test_main_sync_with_obsidian_note(
                         "publicationTitle": "Journal",
                         "DOI": "10.1000/test",
                     }
-                }
+                },
+                {
+                    "data": {
+                        "key": "ATTACH01",
+                        "itemType": "attachment",
+                        "parentItem": "AB12CD34",
+                        "contentType": "application/pdf",
+                    }
+                },
             ]
 
-        def children(self, zotero_key, itemType=None):
-            if itemType == "attachment":
-                return [{"data": {"contentType": "application/pdf", "key": "ATTACH01"}}]
-            if itemType == "note":
-                return []
-            raise AssertionError("Unexpected itemType")
+        def everything(self, result):
+            return result
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sync.zotero, "Zotero", FakeZotero)
@@ -145,18 +150,25 @@ def _fake_zotero(item_key: str, title: str, attach_key: str):
                     "data": {
                         "title": title,
                         "key": item_key,
+                        "itemType": "journalArticle",
                         "creators": [],
                         "date": "2020",
                         "publicationTitle": "",
                         "DOI": "",
                     }
-                }
+                },
+                {
+                    "data": {
+                        "key": attach_key,
+                        "itemType": "attachment",
+                        "parentItem": item_key,
+                        "contentType": "application/pdf",
+                    }
+                },
             ]
 
-        def children(self, key, itemType=None):
-            if itemType == "attachment":
-                return [{"data": {"contentType": "application/pdf", "key": attach_key}}]
-            return []
+        def everything(self, result):
+            return result
 
     return Fake
 
@@ -275,20 +287,33 @@ def test_main_sync_fallback_to_zotero_note(
                     "data": {
                         "title": "Fallback Note Paper",
                         "key": "ZZ99YY88",
+                        "itemType": "journalArticle",
                         "creators": [],
                         "date": "2019",
                         "publicationTitle": "",
                         "DOI": "",
                     }
-                }
+                },
+                {
+                    "data": {
+                        "key": "ATTACH02",
+                        "itemType": "attachment",
+                        "parentItem": "ZZ99YY88",
+                        "contentType": "application/pdf",
+                    }
+                },
+                {
+                    "data": {
+                        "key": "NOTE0002",
+                        "itemType": "note",
+                        "parentItem": "ZZ99YY88",
+                        "note": "<p>Hi<br/>there</p>",
+                    }
+                },
             ]
 
-        def children(self, zotero_key, itemType=None):
-            if itemType == "attachment":
-                return [{"data": {"contentType": "application/pdf", "key": "ATTACH02"}}]
-            if itemType == "note":
-                return [{"data": {"note": "<p>Hi<br/>there</p>"}}]
-            raise AssertionError("Unexpected itemType")
+        def everything(self, result):
+            return result
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sync.zotero, "Zotero", FakeZotero)

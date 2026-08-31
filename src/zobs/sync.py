@@ -29,7 +29,9 @@ from zobs.selector import SelectorError, ZoteroClient, parse_selector
 
 # Config
 
-ITEM_TYPES = "journalArticle || conferencePaper || preprint || report || webpage"
+ITEM_TYPES = (
+    "journalArticle || conferencePaper || preprint || report || webpage || book"
+)
 
 
 def load_config() -> dict:
@@ -147,18 +149,14 @@ def html_to_text(html: str) -> str:
     return text.strip()
 
 
-def fetch_zotero_note(zot: zotero.Zotero, zotero_key: str, cite_key: str) -> str | None:
+def build_zotero_note(notes: list[dict], cite_key: str) -> str | None:
     """
-    Fetch the first child note for a Zotero item and return it as markdown.
-    Returns None if no note exists.
+    Render the first child note of a Zotero item as markdown.
+    Returns None if the item has no note content.
     """
-    try:
-        notes = zot.children(zotero_key, itemType="note")
-    except Exception:
-        return None
     if not notes:
         return None
-    content = notes[0]["data"].get("note", "").strip()
+    content = notes[0].get("data", {}).get("note", "").strip()
     if not content:
         return None
     return f"# {cite_key}\n\n*Imported from Zotero*\n\n{html_to_text(content)}\n"
@@ -265,7 +263,7 @@ def main() -> None:
     # Zotero sync
     zot: ZoteroClient = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
     try:
-        items = cfg["selector"].fetch_items(zot, ITEM_TYPES)
+        items, children_by_parent = cfg["selector"].fetch_items(zot, ITEM_TYPES)
     except ValueError as e:
         print(f"[error] {e}")
         sys.exit(1)
@@ -301,16 +299,12 @@ def main() -> None:
         expected_zotero_notes.add(f"{cite_key}.md")
 
         # ── PDF ───────────────────────────────────────────────────────────────
-        try:
-            attachments = zot.children(zotero_key, itemType="attachment")
-        except Exception as e:
-            print(f"  [err]  API error for {zotero_key}: {e}")
-            if not cfg["bbt_url"]:
-                bib_entries.append(build_bib_entry(item, cite_key))
-            continue
+        item_children = children_by_parent.get(zotero_key, [])
 
         def is_pdf_attachment(att: dict) -> bool:
             data = att.get("data", {})
+            if data.get("itemType") != "attachment":
+                return False
             content_type = str(data.get("contentType", "")).lower()
             filename = str(data.get("filename", "")).lower()
             return content_type in {
@@ -318,7 +312,7 @@ def main() -> None:
                 "application/x-pdf",
             } or filename.endswith(".pdf")
 
-        pdf = next((a for a in attachments if is_pdf_attachment(a)), None)
+        pdf = next((a for a in item_children if is_pdf_attachment(a)), None)
 
         if pdf is None:
             print(f"  [skip] no PDF: {title[:60]}")
@@ -351,8 +345,11 @@ def main() -> None:
             print(f"  [note] {cite_key}.md (obsidian)")
             notes_linked += 1
         else:
-            # Fallback: fetch note written directly in Zotero
-            zotero_note = fetch_zotero_note(zot, zotero_key, cite_key)
+            # Fallback: note written directly on the Zotero item
+            child_notes = [
+                c for c in item_children if c.get("data", {}).get("itemType") == "note"
+            ]
+            zotero_note = build_zotero_note(child_notes, cite_key)
             if zotero_note:
                 (notes_dir / "zotero").mkdir(parents=True, exist_ok=True)
                 note_dest = notes_dir / "zotero" / f"{cite_key}.md"
@@ -399,9 +396,7 @@ def main() -> None:
         bib_file.write_text("\n".join(bib_entries))
         bib_summary = f"refs.bib updated ({len(bib_entries)} entries)."
 
-    notes_summary = (
-        f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
-    )
+    notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"
     print(
         f"\nDone: {synced} new, {migrated} migrated, {skipped} skipped, {pdfs_unlinked} PDFs removed{notes_summary}. {bib_summary}"
     )

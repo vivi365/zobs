@@ -35,6 +35,36 @@ uv run zobs
 
 ---
 
+## Augmenting incomplete entries
+
+`zobs augment` finds refs.bib entries that are missing what an IEEE citation
+needs (venue, year, pages, DOI, …), resolves the real publication metadata from
+Crossref / DataCite / DBLP / OpenAlex / arXiv, writes it into `refs.bib`, and —
+when `ZOTERO_API_KEY` has write access — pushes the same fields back to Zotero so
+the fix survives the next sync.
+
+```bash
+uv run zobs augment              # pick which incomplete entries to fill, interactively
+uv run zobs augment --dry-run    # show what would change, write nothing
+uv run zobs augment --json       # list incomplete entries as JSON (for scripts / agents)
+uv run zobs augment --select KEY1,KEY2   # target specific Zotero keys or citekeys
+```
+
+By default only incomplete entries are offered, all pre-selected; uncheck the
+ones to leave alone. Existing well-formed fields are never overwritten (pass
+`--overwrite` to force it). Entries with no confident match get a
+`% zobs: no confident match …` comment above them in `refs.bib`.
+
+| Variable | Description |
+|---|---|
+| `ZOBS_CONTACT_EMAIL` | optional; joins the Crossref "polite pool" for faster lookups |
+
+Add `references/.zobs-cache` to `.gitignore` — augment caches API responses there.
+
+See [specs/augment-spec.md](specs/augment-spec.md) for the full design.
+
+---
+
 ## Obsidian integration (optional)
 
 Without `OBSIDIAN_NOTES`, the package still works: PDFs sync, `refs.bib` is
@@ -89,5 +119,5 @@ the notes and this connects those to your writing/experiment workspace. Symlinks
 1. `uv init my-project && cd my-project`
 2. `uv add zobs`
 3. Copy `.env.example`, fill in credentials
-4. Add `references/papers/`, `references/notes/`, `.env` to `.gitignore`
+4. Add `references/papers/`, `references/notes/`, `references/.zobs-cache/`, `.env` to `.gitignore`
 5. `uv run zobs`

@@ -1,4 +1,4 @@
-# `zobs augment` — fill in incomplete bibliography entries
+# `zobs augment`: fill in incomplete bibliography entries
 
 Status: **implemented.** This document is the authoritative description of the
 feature; keep it in sync with `src/zobs/augment.py`, `metadata.py`, `cache.py`
@@ -7,7 +7,7 @@ and `cli.py`. Decisions are locked in §10.
 ## 1. Problem
 
 `zobs` builds `references/refs.bib` from whatever Zotero holds. Zotero items are
-often thin — added from a browser button, an arXiv link, or a PDF drop — so the
+often thin, added from a browser button, an arXiv link, or a PDF drop, so the
 generated entries are missing what a real citation needs. From the current
 `variants/paper` bib:
 
@@ -34,11 +34,11 @@ generated entries are missing what a real citation needs. From the current
 
 Three separate defects:
 
-1. **Missing fields** — venue, year, volume, issue, pages, DOI.
-2. **Malformed values** — `year = {June}` from `(data["date"] or "")[:4]` in
+1. **Missing fields:** venue, year, volume, issue, pages, DOI.
+2. **Malformed values:** `year = {June}` from `(data["date"] or "")[:4]` in
    `build_bib_entry` (`sync.py:192`). A month name or ISO timestamp is sliced
    blindly.
-3. **No enrichment path** — nothing pulls the missing data from anywhere.
+3. **No enrichment path:** nothing pulls the missing data from anywhere.
 
 `zobs augment` addresses all three: detect incomplete entries, let the user pick
 which to fix, fetch canonical publication metadata from bibliographic APIs, write
@@ -103,7 +103,7 @@ Incomplete entries (IEEE-required fields missing):
  [x] 1. xiaoMVPDetectingVulnerabilities        missing: venue, year, pages, doi
  [x] 2. caoVulPADetectingSemantically2025      malformed: year   missing: volume, pages
  [x] 3. aleebrahimDNAAutomatedVulnerability2026 malformed: year   missing: pages
- [ ] 4. bishopComputerSecurityArt2018          (book — venue N/A)  missing: publisher
+ [ ] 4. bishopComputerSecurityArt2018          (book, venue N/A)  missing: publisher
 
 Toggle: numbers to flip, 'a' all, 'n' none, Enter to accept >
 ```
@@ -111,7 +111,7 @@ Toggle: numbers to flip, 'a' all, 'n' none, Enter to accept >
 Rendered with `questionary` (checkbox prompt). Falls back to a plain numbered
 toggler when stdin is not a TTY but `--select` was not given.
 
-### Claude-driven flow (primary use — "checkboxes like Claude can")
+### Claude-driven flow (primary use: "checkboxes like Claude can")
 
 1. Claude runs `zobs augment --json`:
 
@@ -134,7 +134,7 @@ toggler when stdin is not a TTY but `--select` was not given.
    }
    ```
 
-   This is fast — one Zotero collection fetch (~3 s after the batch-fetch change),
+   This is fast, one Zotero collection fetch (~3 s after the batch-fetch change),
    no enrichment API calls.
 
 2. Claude presents `AskUserQuestion` with `multiSelect: true`, one option per
@@ -151,7 +151,7 @@ Later this can be wrapped in a `/augment-bib` slash command or an
 
 ## 4. Completeness model
 
-Source of truth is the **Zotero item data**, not the parsed `.bib` — augment
+Source of truth is the **Zotero item data**, not the parsed `.bib`. Augment
 needs the item `version` and `itemType` for write-back anyway, and structured
 data makes malformed-value detection reliable.
 
@@ -169,21 +169,21 @@ Required fields for "IEEE-complete", by item type (Zotero field names):
 | `book`           | `creators`, `title`, `year`, `publisher`        | `place`, `ISBN` |
 | `report`         | `creators`, `title`, `year`                     | `publisher`, `number` |
 | `webpage`        | `title`, `year`, `url`                          | `accessDate` |
-| _(other)_        | `creators`, `title`, `year`                     | — |
+| _(other)_        | `creators`, `title`, `year`                     | n/a |
 
 `volume`/`issue` are not required: too many conference papers are misfiled as
 `journalArticle`, and demanding a volume they will never have just produces
 noise. Augment still fills them from the resolved record.
 
-- `missing_fields(data) -> list[str]` — required field absent or empty.
-- `malformed_fields(data) -> list[str]` — present but unusable:
+- `missing_fields(data) -> list[str]`: required field absent or empty.
+- `malformed_fields(data) -> list[str]`: present but unusable:
   - `date` that yields no 4-digit year via `year_from_date()`
   - `pages` in `{"n. pag.", "-", "–", "—", "none", "in press"}`
 - `complete` = `missing_fields` empty **and** `malformed_fields` empty.
 - Complete entries are skipped by default (the user's requirement). `--all` or
   `--include-complete` overrides.
 
-`year_from_date(s)` in `sync.py` — **done**, replaced the `[:4]` slice. First
+`year_from_date(s)` in `sync.py`, **done**, replaced the `[:4]` slice. First
 `\b(?:19|20)\d{2}\b` match, `""` when none. Corrected 15 mangled years
 (`"June 2025"`, `"2026-07-15T00:22:32Z"`, `"5/20/2017"`, `"01/2025"`, …) on the
 first `variants/paper` run.
@@ -210,7 +210,7 @@ item
 ```
 
 Rationale for multiple sources: **Crossref alone is not enough for this field.**
-Confirmed while writing this spec — "MVP: Detecting Vulnerabilities using
+Confirmed while writing this spec: "MVP: Detecting Vulnerabilities using
 Patch-Enhanced Vulnerability Signatures" (USENIX Security 2020) is absent from
 Crossref entirely. USENIX, NDSS, and some IEEE S&P papers need DBLP or OpenAlex.
 
@@ -297,19 +297,19 @@ Only non-empty fields are emitted. Field order fixed for stable diffs.
 
 | Metadata          | `journalArticle` | `conferencePaper` | `preprint` |
 |-------------------|------------------|-------------------|------------|
-| `container_title` | `publicationTitle` | `proceedingsTitle` | — |
-| `container_short` | `journalAbbreviation` | — | — |
-| `event_name`      | — | `conferenceName` | — |
-| `event_place`     | — | `place` | — |
-| `volume`          | `volume` | `volume` | — |
-| `issue`           | `issue` | `issue` | — |
-| `pages`           | `pages` | `pages` | — |
+| `container_title` | `publicationTitle` | `proceedingsTitle` | n/a |
+| `container_short` | `journalAbbreviation` | n/a | n/a |
+| `event_name`      | n/a | `conferenceName` | n/a |
+| `event_place`     | n/a | `place` | n/a |
+| `volume`          | `volume` | `volume` | n/a |
+| `issue`           | `issue` | `issue` | n/a |
+| `pages`           | `pages` | `pages` | n/a |
 | `year`/`month`    | `date` (`YYYY-MM` or `YYYY`) | same | same |
 | `doi`             | `DOI` | `DOI` | `DOI` |
-| `issn`            | `ISSN` | `ISSN` | — |
-| `isbn`            | — | `ISBN` | — |
-| `publisher`       | `publisher` | `publisher` | — |
-| `arxiv_id`        | — | — | `archiveID` (`arXiv:<id>`), `repository = arXiv` |
+| `issn`            | `ISSN` | `ISSN` | n/a |
+| `isbn`            | n/a | `ISBN` | n/a |
+| `publisher`       | `publisher` | `publisher` | n/a |
+| `arxiv_id`        | n/a | n/a | `archiveID` (`arXiv:<id>`), `repository = arXiv` |
 
 Field names verified against `zot.item_template(...)` for each type.
 
@@ -322,7 +322,7 @@ Field names verified against `zot.item_template(...)` for each type.
   entry and the ordering untouched.
 - `ZOTERO_BBT_URL` mode: `refs.bib` is Better BibTeX's export and zobs must not
   fight it. In this mode augment **requires** a Zotero push (`--no-bib` is
-  implied) — once Zotero has the data, the next sync re-pulls the corrected
+  implied). Once Zotero has the data, the next sync re-pulls the corrected
   export. If `--no-zotero` is also given, error out with an explanation.
 - Merge rule: fill only empty/malformed fields. `--overwrite` replaces
   non-empty fields when the source is a DOI hit (score 1.0); never on a fuzzy
@@ -332,7 +332,7 @@ Field names verified against `zot.item_template(...)` for each type.
 
 - Needs an API key with **write** access. Detect up front: a trial
   `zot.update_item` returning 403 → stop with
-  `"ZOTERO_API_KEY lacks write access — enable it at zotero.org/settings/keys"`.
+  `"ZOTERO_API_KEY lacks write access, enable it at zotero.org/settings/keys"`.
 - Reuse the item dict from the collection fetch (already carries `version`).
   Merge the mapped fields into `item["data"]`, then `zot.update_item(item)`
   (pyzotero sends `If-Unmodified-Since-Version`).
@@ -342,7 +342,7 @@ Field names verified against `zot.item_template(...)` for each type.
   v1.
 - `--dry-run` prints the per-item JSON patch.
 - After a successful push (non-BBT mode) regenerate the bib from the merged data
-  in memory — no second Zotero round-trip.
+  in memory, no second Zotero round-trip.
 
 ## 8. Output
 
@@ -361,7 +361,7 @@ Resolving 3 entries...
     issue             (empty)  ->  FSE
     pages             (empty)  ->  2430-2453
 
-  yunCLEARCausalContextBased2026a              no confident match (best: DBLP 0.71) — skipped
+  yunCLEARCausalContextBased2026a              no confident match (best: DBLP 0.71), skipped
 
 Apply to refs.bib and push 2 items to Zotero? [y/N]
 ```
@@ -418,13 +418,13 @@ for completeness detection, `year_from_date`, matching thresholds, bib splice
    new `cli.py`; bare `zobs` still runs the sync.
 2. **Dependencies added.** `rapidfuzz` (title matching) and `questionary` (the
    standalone checklist). Both real deps, not optional extras.
-3. **Crossref polite pool** — opt-in only, `mailto=` sent when `ZOBS_CONTACT_EMAIL`
+3. **Crossref polite pool**, opt-in only, `mailto=` sent when `ZOBS_CONTACT_EMAIL`
    is set. Default off.
 4. **Confirm once per batch.** Show the full resolved diff, then a single
    `[y/N]`. No per-entry prompting for DOI hits. `--yes` skips it.
 5. **No-match marker.** An unmatched entry gets a comment line written into
    `refs.bib` directly above it:
-   `% zobs: no confident match — still missing {proceedingsTitle, pages}`
+   `% zobs: no confident match, still missing {proceedingsTitle, pages}`
    Removed automatically on a later run that does resolve it. No separate report
    file.
 6. **Preprints stay `@article`** with `journal = {arXiv preprint arXiv:<id>}`,
@@ -433,23 +433,23 @@ for completeness detection, `year_from_date`, matching thresholds, bib splice
    (current `main.tex` bibstyle) and `IEEEtran`, and changes no `\cite` calls.
 7. **Repair is on by default** (`--repair`, opt-out with `--no-repair`).
    Obviously-malformed values (`year = "June"`, `pages = "n. pag."`) are treated
-   as empty and refilled. This is not `--overwrite` — well-formed existing values
+   as empty and refilled. This is not `--overwrite`, well-formed existing values
    are still left alone.
 8. **Zotero write scope:** IEEE-required fields plus `DOI`, `ISSN`/`ISBN`,
    `publisher`, and the arXiv id. Not abstract/URL/keywords in v1.
 9. **Per-entry selection only.** No per-field checkboxes.
 
-### Matching accuracy (decision 4 detail — the academic-standard bar)
+### Matching accuracy (decision 4 detail: the academic-standard bar)
 
 Identifier first, then a strict check. Signals per candidate (`metadata.Match`):
 
-- `ratio` — `rapidfuzz.fuzz.token_sort_ratio` of the normalised titles (0–100).
+- `ratio`: `rapidfuzz.fuzz.token_sort_ratio` of the normalised titles (0–100).
   `token_sort` not `token_set`: `token_set` dedupes and drops extra tokens, so a
   3-word title like "V1SCAN Discovering 1day" scored ~93 against unrelated
   workshop papers. `token_sort` does not.
-- `author_ok` — first-author surname matches.
-- `year_ok` — `|year_pub − year_have| ≤ 1`, or the local item has no year.
-- `key_ok` — the **key-term gate**: if the local title leads with a system name
+- `author_ok`: first-author surname matches.
+- `year_ok`: `|year_pub − year_have| ≤ 1`, or the local item has no year.
+- `key_ok`: the **key-term gate**: if the local title leads with a system name
   (`MOVERY:`, `V1SCAN -`), the candidate title must contain it. This is what
   rejects the VUDDY-for-MOVERY and APSEC-for-V1SCAN false hits.
 

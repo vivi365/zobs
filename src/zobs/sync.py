@@ -17,6 +17,7 @@ Configuration (via .env in the project root):
 """
 
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -139,10 +140,25 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
     return index
 
 
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def year_from_date(date: str | None) -> str:
+    """
+    Extract a 4-digit year from a Zotero date string.
+
+    Zotero stores dates free-form: "2025", "2025-06-19", "June 2025",
+    "2026-07-15T00:22:32Z", "forthcoming", "". Returns "" when there is
+    no year to find (the old ``date[:4]`` turned "June 2025" into "June").
+    """
+    if not date:
+        return ""
+    match = _YEAR_RE.search(date)
+    return match.group(0) if match else ""
+
+
 def html_to_text(html: str) -> str:
     """Strip HTML tags for basic Zotero note content."""
-    import re
-
     text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
@@ -173,10 +189,39 @@ def fetch_bbt_bib(url: str) -> str:
         raise RuntimeError(f"Better BibTeX export failed: {e}") from e
 
 
+_ARXIV_ID_RE = re.compile(
+    r"arxiv[:/ ]\s*([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)", re.IGNORECASE
+)
+
+
+def arxiv_id_from_item(data: dict) -> str:
+    """Best-effort arXiv id from a Zotero item's archiveID / url / DOI."""
+    for key in ("archiveID", "url", "DOI"):
+        match = _ARXIV_ID_RE.search(str(data.get(key) or ""))
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _emit_entry(entry_type: str, cite_key: str, fields: list[tuple[str, str]]) -> str:
+    width = max(len(name) for name, _ in fields)
+    lines = [f"@{entry_type}{{{cite_key},"]
+    for name, value in fields:
+        lines.append(f"  {name.ljust(width)} = {{{value}}},")
+    return "\n".join(lines) + "\n}\n"
+
+
 def build_bib_entry(item: dict, cite_key: str) -> str:
-    """Build a minimal BibTeX entry from a Zotero item."""
+    """
+    Build a BibTeX entry from a Zotero item.
+
+    Core fields (title, author, venue, year, doi) are always written, even
+    when empty, as placeholders. Fields that only ``zobs augment`` fills in
+    (volume, issue, pages, publisher, place) appear once they have a value.
+    """
     data = item["data"]
-    authors = data.get("creators", [])
+    creators = data.get("creators", [])
+    item_type = (data.get("itemType") or "").strip()
 
     def fmt_author(a: dict) -> str:
         last = a.get("lastName", "")
@@ -186,40 +231,59 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
         return f"{{{last}}}"
 
     author_str = (
-        " and ".join(fmt_author(a) for a in authors if a.get("creatorType") == "author")
+        " and ".join(
+            fmt_author(a) for a in creators if a.get("creatorType") == "author"
+        )
         or "Unknown"
     )
-    year = (data.get("date") or "")[:4]
-    item_type = (data.get("itemType") or "").strip()
+    year = year_from_date(data.get("date"))
     title = data.get("title", "")
     doi = data.get("DOI", "")
 
     if item_type == "conferencePaper":
-        booktitle = (
+        entry_type = "inproceedings"
+        venue = (
             data.get("proceedingsTitle")
             or data.get("conferenceName")
             or data.get("publicationTitle")
             or ""
         )
-        return (
-            f"@inproceedings{{{cite_key},\n"
-            f"  title     = {{{title}}},\n"
-            f"  author    = {{{author_str}}},\n"
-            f"  booktitle = {{{booktitle}}},\n"
-            f"  year      = {{{year}}},\n"
-            f"  doi       = {{{doi}}},\n"
-            f"}}\n"
-        )
+        ordered = [
+            ("title", title, True),
+            ("author", author_str, True),
+            ("booktitle", venue, True),
+            ("year", year, True),
+            ("volume", data.get("volume", ""), False),
+            ("pages", data.get("pages", ""), False),
+            ("publisher", data.get("publisher", ""), False),
+            ("address", data.get("place", ""), False),
+            ("doi", doi, True),
+        ]
+    else:
+        entry_type = "article"
+        journal = data.get("publicationTitle", "") or ""
+        if item_type == "preprint" and not journal:
+            arxiv = arxiv_id_from_item(data)
+            journal = f"arXiv preprint arXiv:{arxiv}" if arxiv else "Preprint"
+        ordered = [
+            ("title", title, True),
+            ("author", author_str, True),
+            ("year", year, True),
+            ("journal", journal, True),
+            ("volume", data.get("volume", ""), False),
+            ("number", data.get("issue", ""), False),
+            ("pages", data.get("pages", ""), False),
+            ("publisher", data.get("publisher", ""), False),
+            ("doi", doi, True),
+        ]
 
-    return (
-        f"@article{{{cite_key},\n"
-        f"  title   = {{{title}}},\n"
-        f"  author  = {{{author_str}}},\n"
-        f"  year    = {{{year}}},\n"
-        f"  journal = {{{data.get('publicationTitle', '')}}},\n"
-        f"  doi     = {{{doi}}},\n"
-        f"}}\n"
-    )
+    fields = [(name, value) for name, value, always in ordered if always or value]
+    return _emit_entry(entry_type, cite_key, fields)
+
+
+def generate_bib(entries: list[tuple[dict, str]]) -> str:
+    """Render a full .bib document from ``(zotero_item, cite_key)`` pairs."""
+    return "\n".join(build_bib_entry(item, cite_key) for item, cite_key in entries)
 
 
 def citation_key_from_item(data: dict, zotero_key: str) -> str:
@@ -275,7 +339,7 @@ def main() -> None:
         print(f"        {e}")
         sys.exit(1)
 
-    bib_entries: list[str] = []
+    bib_entries: list[tuple[dict, str]] = []
     synced, migrated, skipped = 0, 0, 0
     notes_linked, notes_unlinked, notes_missing = 0, 0, 0
     expected_pdfs: set[str] = set()
@@ -360,7 +424,7 @@ def main() -> None:
                 notes_missing += 1
 
         if not cfg["bbt_url"]:
-            bib_entries.append(build_bib_entry(item, cite_key))
+            bib_entries.append((item, cite_key))
 
     # Remove PDFs and Zotero notes no longer in the selection
     pdfs_unlinked = 0
@@ -393,7 +457,7 @@ def main() -> None:
         bib_file.write_text(bib_text)
         bib_summary = "refs.bib updated (Better BibTeX export)."
     else:
-        bib_file.write_text("\n".join(bib_entries))
+        bib_file.write_text(generate_bib(bib_entries))
         bib_summary = f"refs.bib updated ({len(bib_entries)} entries)."
 
     notes_summary = f", {notes_linked} notes linked, {notes_unlinked} unlinked, {notes_missing} no note"

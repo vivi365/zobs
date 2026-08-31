@@ -18,6 +18,30 @@ def test_parse_frontmatter() -> None:
     assert sync.parse_frontmatter("No frontmatter") == {}
 
 
+def test_year_from_date() -> None:
+    assert sync.year_from_date("2025") == "2025"
+    assert sync.year_from_date("2025-06-19") == "2025"
+    assert sync.year_from_date("2026-07-15T00:22:32Z") == "2026"
+    assert sync.year_from_date("June 2025") == "2025"  # was "June" under date[:4]
+    assert sync.year_from_date("May 5, 2024") == "2024"
+    assert sync.year_from_date("") == ""
+    assert sync.year_from_date(None) == ""
+    assert sync.year_from_date("forthcoming") == ""
+
+
+def test_build_bib_entry_parses_year_from_messy_date() -> None:
+    item = {
+        "data": {
+            "itemType": "conferencePaper",
+            "title": "T",
+            "date": "April 2026",
+            "creators": [],
+            "proceedingsTitle": "Proc.",
+        }
+    }
+    assert "year      = {2026}," in sync.build_bib_entry(item, "key2026")
+
+
 def test_scan_obsidian_notes_indexes_only_opted_in(tmp_path: Path) -> None:
     notes = tmp_path / "notes"
     notes.mkdir()

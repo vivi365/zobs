@@ -17,6 +17,7 @@ Configuration (via .env in the project root):
 """
 
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -139,10 +140,25 @@ def scan_obsidian_notes(notes_root: Path) -> dict[str, tuple[Path, str]]:
     return index
 
 
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def year_from_date(date: str | None) -> str:
+    """
+    Extract a 4-digit year from a Zotero date string.
+
+    Zotero stores dates free-form: "2025", "2025-06-19", "June 2025",
+    "2026-07-15T00:22:32Z", "forthcoming", "". Returns "" when there is
+    no year to find (the old ``date[:4]`` turned "June 2025" into "June").
+    """
+    if not date:
+        return ""
+    match = _YEAR_RE.search(date)
+    return match.group(0) if match else ""
+
+
 def html_to_text(html: str) -> str:
     """Strip HTML tags for basic Zotero note content."""
-    import re
-
     text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
@@ -189,7 +205,7 @@ def build_bib_entry(item: dict, cite_key: str) -> str:
         " and ".join(fmt_author(a) for a in authors if a.get("creatorType") == "author")
         or "Unknown"
     )
-    year = (data.get("date") or "")[:4]
+    year = year_from_date(data.get("date"))
     item_type = (data.get("itemType") or "").strip()
     title = data.get("title", "")
     doi = data.get("DOI", "")

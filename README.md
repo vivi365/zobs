@@ -61,8 +61,6 @@ ones to leave alone. Existing well-formed fields are never overwritten (pass
 
 Add `references/.zobs-cache` to `.gitignore` — augment caches API responses there.
 
-See [specs/augment-spec.md](specs/augment-spec.md) for the full design.
-
 ---
 
 ## Obsidian integration (optional)

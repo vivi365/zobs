@@ -91,7 +91,7 @@ options:
   --repair               treat obviously-malformed values (year="June") as blank
                          (default: on)
   --min-confidence 93    token_sort_ratio bar for entries without a usable DOI
-  --sources LIST         comma list / order (default: crossref,datacite,dblp,openalex,arxiv)
+  --sources LIST         title-search order (default: dblp,crossref,datacite,openalex,arxiv)
   --refresh              ignore the local API response cache
 ```
 

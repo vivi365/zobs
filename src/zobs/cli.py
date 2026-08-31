@@ -81,8 +81,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     aug.add_argument(
         "--sources",
-        default="crossref,datacite,dblp,openalex,arxiv",
-        help="comma-separated source list / order",
+        default="dblp,crossref,datacite,openalex,arxiv",
+        help="comma-separated source list / order (title-search order; DOI "
+        "lookups use whichever of crossref/datacite/openalex are listed)",
     )
     aug.add_argument(
         "--refresh", action="store_true", help="ignore the local API response cache"

@@ -24,7 +24,7 @@ Use the `.env.example` to create your `.env` config
 | `ZOTERO_TAG` | yes (mode=tag) | Tag name or comma-separated list (AND logic) |
 | `ZOTERO_STORAGE` | no | Path to Zotero local storage (default: `~/Zotero/storage`) |
 | `ZOTERO_BBT_URL` | no | Better BibTeX local export URL (overrides built-in BibTeX generation) |
-| `OBSIDIAN_NOTES` | no | Path to your Obsidian paper-summaries folder — see below |
+| `OBSIDIAN_NOTES` | no | Path to your Obsidian paper-summaries folder (see below) |
 
 > API key and user ID are retrieved from [zotero.org/settings/keys](https://www.zotero.org/settings/keys). The collection id can be seen in the last part of URL in the Zotero web interface, e.g. `https://www.zotero.org/<username>/collections/<collection-id>/collection` or simply use the plaintext leaf-level name. For tag mode, set `ZOTERO_SYNC_MODE=tag` and provide one or more tags in `ZOTERO_TAG` (comma-separated; AND logic).
 
@@ -37,11 +37,10 @@ uv run zobs
 
 ## Augmenting incomplete entries
 
-`zobs augment` finds refs.bib entries that are missing what an IEEE citation
-needs (venue, year, pages, DOI, …), resolves the real publication metadata from
-Crossref / DataCite / DBLP / OpenAlex / arXiv, writes it into `refs.bib`, and —
-when `ZOTERO_API_KEY` has write access — pushes the same fields back to Zotero so
-the fix survives the next sync.
+`zobs augment` looks for refs.bib entries that are missing what an IEEE citation
+needs (venue, year, pages, DOI) and fills them in from public bibliographic
+data. It updates `refs.bib`. If `ZOTERO_API_KEY` can write, it also saves the
+same fields to Zotero so the next sync keeps them.
 
 ```bash
 uv run zobs augment              # pick which incomplete entries to fill, interactively
@@ -50,16 +49,31 @@ uv run zobs augment --json       # list incomplete entries as JSON (for scripts 
 uv run zobs augment --select KEY1,KEY2   # target specific Zotero keys or citekeys
 ```
 
-By default only incomplete entries are offered, all pre-selected; uncheck the
-ones to leave alone. Existing well-formed fields are never overwritten (pass
-`--overwrite` to force it). Entries with no confident match get a
-`% zobs: no confident match …` comment above them in `refs.bib`.
+By default it lists only the incomplete entries, with every one checked; uncheck
+any you want to skip. A field that already has a sensible value is left alone
+unless you pass `--overwrite`.
 
-| Variable | Description |
-|---|---|
-| `ZOBS_CONTACT_EMAIL` | optional; joins the Crossref "polite pool" for faster lookups |
+### How an entry is resolved
 
-Add `references/.zobs-cache` to `.gitignore` — augment caches API responses there.
+If the entry has a DOI, `zobs augment` reads it directly and uses that. Normal
+DOIs come from Crossref; arXiv and Zenodo DOIs (`10.48550`, `10.5281`) come from
+DataCite.
+
+If there is no DOI, `zobs augment` searches by title. It asks DBLP first, since
+DBLP has the best coverage of USENIX, NDSS, S&P and CS venues in general, then
+Crossref, then OpenAlex, then arXiv, and it stops at the first good result. A
+result counts as good when the title is close enough, the first author's surname
+matches, the year is within one, and, when the title starts with a tool name
+like `MOVERY:`, that name also appears in the candidate. That last check is what
+keeps a `MOVERY` entry from being filled in with the `VUDDY` paper. Pass
+`--sources dblp,crossref,openalex` to shorten or reorder the list.
+
+If no source returns a good result, `zobs augment` leaves the entry as it is and
+writes a `% zobs: no confident match ...` line above it in `refs.bib`.
+
+Set `ZOBS_CONTACT_EMAIL` to join the Crossref "polite pool" for faster lookups.
+Add `references/.zobs-cache` to `.gitignore`; that is where `zobs augment` keeps
+its cache of API responses.
 
 ---
 

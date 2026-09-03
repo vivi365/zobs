@@ -360,3 +360,133 @@ def test_main_sync_fallback_to_zotero_note(
     text = note_file.read_text()
     assert "Imported from Zotero" in text
     assert "Hi\nthere" in text
+
+
+# ── library type (user vs group) ────────────────────────────────────────────
+
+
+def _recording_zotero(calls: list) -> type:
+    """A Zotero stub over an empty collection that records constructor args."""
+
+    class Fake:
+        def __init__(self, *args, **kwargs):
+            calls.append(args)
+
+        def collections(self):
+            return [{"data": {"name": "Papers", "key": "COLL0001"}}]
+
+        def collection_items(self, collection_key, itemType=None):
+            return []
+
+        def everything(self, result):
+            return result
+
+    return Fake
+
+
+def _library_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Everything a run needs except the library type and its ID."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZOTERO_API_KEY", "abc")
+    monkeypatch.setenv("ZOTERO_COLLECTION", "Papers")
+    monkeypatch.setenv("ZOTERO_STORAGE", str(tmp_path / "storage"))
+    for var in (
+        "OBSIDIAN_NOTES",
+        "ZOTERO_BBT_URL",
+        "ZOTERO_LIBRARY_TYPE",
+        "ZOTERO_GROUP_ID",
+        "ZOTERO_USER_ID",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_load_config_defaults_to_the_user_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+
+    cfg = sync.load_config()
+
+    assert cfg["library_id"] == "123"
+    assert cfg["library_type"] == "user"
+
+
+def test_load_config_treats_commented_library_type_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "# group")
+
+    assert sync.load_config()["library_type"] == "user"
+
+
+def test_load_config_group_mode_uses_the_group_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "group")
+    monkeypatch.setenv("ZOTERO_GROUP_ID", "987654")
+
+    cfg = sync.load_config()
+
+    assert cfg["library_id"] == "987654"
+    assert cfg["library_type"] == "group"
+
+
+def test_load_config_group_mode_asks_for_group_id_not_user_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "group")
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+
+    with pytest.raises(SystemExit):
+        sync.load_config()
+
+    out = capsys.readouterr().out
+    assert "Missing required .env variables: ZOTERO_GROUP_ID" in out
+    assert "ZOTERO_USER_ID" not in out
+
+
+def test_load_config_rejects_invalid_library_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "team")
+
+    with pytest.raises(SystemExit):
+        sync.load_config()
+
+    out = capsys.readouterr().out
+    assert "Invalid ZOTERO_LIBRARY_TYPE 'team'. Expected 'user' or 'group'." in out
+    assert "Copy .env.example to .env" in out
+
+
+def test_main_builds_a_user_client_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list = []
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_USER_ID", "123")
+    monkeypatch.setattr(sync.zotero, "Zotero", _recording_zotero(calls))
+
+    sync.main()
+
+    assert calls == [("123", "user", "abc")]
+
+
+def test_main_builds_a_group_client_without_a_user_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list = []
+    _library_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "group")
+    monkeypatch.setenv("ZOTERO_GROUP_ID", "987654")
+    monkeypatch.setattr(sync.zotero, "Zotero", _recording_zotero(calls))
+
+    sync.main()
+
+    assert calls == [("987654", "group", "abc")]

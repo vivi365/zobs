@@ -81,6 +81,62 @@ its cache of API responses.
 
 ---
 
+## Finding papers you are missing
+
+`zobs discover` reads the reference list of every paper in your selection and
+looks for papers that several of them cite but that you do not have. If five of
+your sixty papers cite something and you have never added it, that is usually
+worth a look. This is backward snowballing, done for you.
+
+```bash
+uv run zobs discover                  # ranked list of what you are missing
+uv run zobs discover --min-count 4    # only things cited by 4+ of your papers
+uv run zobs discover --limit 50       # show more
+uv run zobs discover --json           # same results as JSON, for scripts / agents
+```
+
+Output looks like this:
+
+```
+Resolved 54/61 selection items; 48 had reference data (1904 references read).
+
+   #  cited   global  year  first author      venue                 title
+   1      3      614  2006  Li                IEEE Transactions o…  CP-Miner: finding copy-paste and related bugs…
+      via jangReDeBug2012, kimVUDDY2017, liVulPecker2016
+      doi 10.1109/tse.2006.28
+```
+
+`cited` is how many of your own papers cite it, `global` is its total citation
+count everywhere. The `via` line names which of your papers cite it, so you can
+check the suggestion instead of taking it on faith.
+
+Results are not ranked by raw count. Raw count puts the famous papers on top,
+and those are usually the ones you have already decided to skip. A paper cited
+by 5 of your 60 with 200 citations worldwide ranks above one cited by the same 5
+with 40,000, because the first is specific to what you are reading and the
+second is cited by everyone.
+
+The first line is the honest version of how much was actually read. OpenAlex
+does not have reference lists for every paper, and its coverage of USENIX and
+NDSS is thinner than its coverage of ACM and IEEE, so a short list sometimes
+means missing data rather than nothing to find.
+
+### Dismissing suggestions
+
+```bash
+uv run zobs discover --ignore 10.1109/tse.2006.28
+```
+
+That adds the paper to `references/.zobs-ignore` and it will not come back.
+Takes a DOI or an OpenAlex id, and can be repeated. Unlike the cache, this file
+is meant to be committed, so a decision you make once holds on every machine.
+
+`zobs discover` only reads. It does not add anything to Zotero, touch
+`refs.bib`, or download PDFs. It shares the cache with `zobs augment`, so if you
+have already run `augment` over the collection most of the lookups are free.
+
+---
+
 ## Obsidian integration (optional)
 
 Without `OBSIDIAN_NOTES`, the package still works: PDFs sync, `refs.bib` is

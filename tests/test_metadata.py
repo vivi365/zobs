@@ -61,6 +61,32 @@ def test_from_openalex_biblio_pages() -> None:
     assert m.authors == [("Marco", "Vandenberghe")]
 
 
+def test_from_openalex_captures_id_and_references() -> None:
+    work = {
+        "id": "https://openalex.org/W2741809807",
+        "title": "VUDDY",
+        "cited_by_count": 412,
+        "referenced_works": [
+            "https://openalex.org/W123",
+            "https://openalex.org/W456",
+        ],
+    }
+    m = md._from_openalex(work)
+    assert m.openalex_id == "W2741809807"
+    assert m.referenced_works == ["W123", "W456"]
+    assert m.cited_by_count == 412
+    # citation-graph fields must not make an otherwise empty record look
+    # populated to augment
+    assert m.is_empty()
+
+
+def test_openalex_by_ids_batches_at_fifty() -> None:
+    cache = FakeCache({"openalex_id:": {"results": []}})
+    md.openalex_by_ids([f"W{i}" for i in range(1, 121)], cache)
+    assert len(cache.urls) == 3  # 50 + 50 + 20, not 120 requests
+    assert len(cache.urls[0].split("openalex_id:")[1].split("&")[0].split("|")) == 50
+
+
 def test_arxiv_id_of_variants() -> None:
     assert md.arxiv_id_of({"archiveID": "arXiv:2607.12316"}) == "2607.12316"
     assert md.arxiv_id_of({"DOI": "10.48550/arXiv.2401.01234"}) == "2401.01234"
@@ -119,8 +145,10 @@ class FakeCache:
     def __init__(self, routes: dict[str, object]) -> None:
         self.routes = routes
         self.refresh = False
+        self.urls: list[str] = []
 
     def _match(self, url: str):
+        self.urls.append(url)
         for frag, payload in self.routes.items():
             if frag in url:
                 return payload

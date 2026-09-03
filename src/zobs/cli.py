@@ -1,7 +1,8 @@
 """Command-line entry point for zobs.
 
 ``zobs`` with no subcommand runs the sync (unchanged). ``zobs augment`` fills
-in incomplete refs.bib entries from bibliographic APIs.
+in incomplete refs.bib entries from bibliographic APIs. ``zobs discover`` finds
+papers the collection keeps citing but does not hold.
 """
 
 from __future__ import annotations
@@ -88,6 +89,41 @@ def _build_parser() -> argparse.ArgumentParser:
     aug.add_argument(
         "--refresh", action="store_true", help="ignore the local API response cache"
     )
+
+    dis = sub.add_parser(
+        "discover",
+        help="Find papers your collection keeps citing but does not hold.",
+    )
+    dis.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        metavar="N",
+        help="how many suggestions to print (default: 25)",
+    )
+    dis.add_argument(
+        "--min-count",
+        type=int,
+        default=2,
+        metavar="N",
+        help="only suggest papers cited by at least N of your papers (default: 2)",
+    )
+    dis.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="print the ranked suggestions as JSON",
+    )
+    dis.add_argument(
+        "--refresh", action="store_true", help="ignore the local API response cache"
+    )
+    dis.add_argument(
+        "--ignore",
+        action="append",
+        metavar="KEY",
+        help="add an OpenAlex id or DOI to references/.zobs-ignore and exit "
+        "(repeatable)",
+    )
     return parser
 
 
@@ -97,6 +133,11 @@ def main(argv: list[str] | None = None) -> None:
         from zobs.augment import run_augment
 
         raise SystemExit(run_augment(args))
+
+    if args.command == "discover":
+        from zobs.discover import run_discover
+
+        raise SystemExit(run_discover(args))
 
     from zobs.sync import main as sync_main
 

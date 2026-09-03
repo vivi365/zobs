@@ -174,3 +174,56 @@ def test_splice_appends_when_missing() -> None:
     out = augment._splice_bib(_BIB, "gamma", new, None)
     assert out.endswith("@article{gamma,\n  title = {Gamma},\n}\n")
     assert "@article{alpha," in out
+
+
+# ── write access ────────────────────────────────────────────────────────────
+
+
+class _KeyInfoZotero:
+    def __init__(self, info):
+        self._info = info
+
+    def key_info(self):
+        return self._info
+
+
+def test_has_write_access_user_library() -> None:
+    zot = _KeyInfoZotero({"access": {"user": {"library": True, "write": True}}})
+    assert augment._has_write_access(zot)
+    assert augment._has_write_access(zot, "user", "123")
+
+    no_grant = _KeyInfoZotero({"access": {"user": {}}})
+    assert not augment._has_write_access(no_grant)
+
+
+def test_has_write_access_group_library() -> None:
+    # A group key carries no "user" grant at all, so reading the user shape
+    # would wrongly report no write access.
+    zot = _KeyInfoZotero(
+        {"access": {"groups": {"987654": {"library": True, "write": True}}}}
+    )
+    assert augment._has_write_access(zot, "group", "987654")
+    assert augment._has_write_access(zot, "group", 987654)
+    assert not augment._has_write_access(zot)  # the old user-only lookup
+
+    # a group the key says nothing about, with no catch-all
+    assert not augment._has_write_access(zot, "group", "111111")
+
+
+def test_has_write_access_group_falls_back_to_all() -> None:
+    zot = _KeyInfoZotero({"access": {"groups": {"all": {"write": True}}}})
+    assert augment._has_write_access(zot, "group", "987654")
+
+    # a per-group entry takes precedence over the catch-all
+    denied = _KeyInfoZotero(
+        {"access": {"groups": {"987654": {}, "all": {"write": True}}}}
+    )
+    assert not augment._has_write_access(denied, "group", "987654")
+
+
+def test_has_write_access_assumes_yes_when_key_info_fails() -> None:
+    class Broken:
+        def key_info(self):
+            raise RuntimeError("offline")
+
+    assert augment._has_write_access(Broken(), "group", "987654")

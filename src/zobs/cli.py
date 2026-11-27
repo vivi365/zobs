@@ -121,7 +121,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ignore",
         action="append",
         metavar="KEY",
-        help="add an OpenAlex id or DOI to references/.zobs-ignore and exit "
+        help="add papers to references/.zobs-ignore and exit: row numbers from "
+        "the last run (3, 1-25, 2,5,7) or an OpenAlex id / DOI / link "
         "(repeatable)",
     )
     return parser

@@ -127,13 +127,25 @@ means missing data rather than nothing to find.
 
 ### Dismissing suggestions
 
+Use the row numbers from the last run:
+
+```bash
+uv run zobs discover --ignore 3          # one row
+uv run zobs discover --ignore 1-25       # the whole list you just saw
+uv run zobs discover --ignore 2,5,7-9    # a mix
+```
+
+Or name a paper directly with its DOI, OpenAlex id, or the printed link:
+
 ```bash
 uv run zobs discover --ignore 10.1109/tse.2006.28
 ```
 
-That adds the paper to `references/.zobs-ignore` and it will not come back.
-Takes a DOI or an OpenAlex id, and can be repeated. Unlike the cache, this file
-is meant to be committed, so a decision you make once holds on every machine.
+Either way the papers go into `references/.zobs-ignore` and will not come back.
+Row numbers always mean the list the last `zobs discover` printed, and a number
+that run did not show is an error, not a guess. Unlike the cache, the ignore
+file is meant to be committed, so a decision you make once holds on every
+machine.
 
 `zobs discover` only reads. It does not add anything to Zotero, touch
 `refs.bib`, or download PDFs. It shares the cache with `zobs augment`, so if you

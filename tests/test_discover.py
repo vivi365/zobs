@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from zobs import discover
 from zobs.metadata import Metadata
 
@@ -347,3 +349,63 @@ def test_render_lists_duplicates(capsys) -> None:
     out = capsys.readouterr().out
     assert "1 paper is in your selection more than once" in out
     assert "liStudy2017 = liStudy2017a" in out
+
+
+# ── ignoring by row number ──────────────────────────────────────────────────
+
+
+def test_rank_specs_are_told_apart_from_dois_and_ids() -> None:
+    assert discover.is_rank_spec("3")
+    assert discover.is_rank_spec("1-25")
+    assert discover.is_rank_spec("2,5,7-9")
+    assert not discover.is_rank_spec("10.1109/sp.2015.48")
+    assert not discover.is_rank_spec("W2888989071")
+    assert not discover.is_rank_spec("https://doi.org/10.1/x")
+    assert discover.parse_ranks("2,5,7-9") == [2, 5, 7, 8, 9]
+    assert discover.parse_ranks("3-1,2") == [1, 2, 3]
+
+
+def _saved(tmp_path, n=3):
+    rows = [
+        discover.Discovery(
+            f"W{i}", ["a", "b"], Metadata(title=f"Paper {i}", doi=f"10.1/p{i}")
+        )
+        for i in range(1, n + 1)
+    ]
+    rows[1].metadata.doi = None  # row 2 is known only by its OpenAlex id
+    path = tmp_path / "last.json"
+    discover.save_last(path, rows)
+    return path
+
+
+def test_expand_ignore_maps_rows_to_what_was_printed(tmp_path) -> None:
+    last = discover.load_last(_saved(tmp_path))
+    picked = discover.expand_ignore(["1-2", "10.9/other"], last)
+    assert picked == [
+        ("10.1/p1", "Paper 1"),
+        ("W2", "Paper 2"),
+        ("10.9/other", ""),
+    ]
+
+
+def test_expand_ignore_refuses_rows_it_did_not_show(tmp_path) -> None:
+    last = discover.load_last(_saved(tmp_path))
+    with pytest.raises(ValueError, match="no row 4"):
+        discover.expand_ignore(["2-4"], last)
+    with pytest.raises(ValueError, match="run `zobs discover` first"):
+        discover.expand_ignore(["1"], [])
+
+
+def test_ignore_by_rank_end_to_end(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    _ = _saved(tmp_path)
+    (tmp_path / discover.LAST_FILE).parent.mkdir(parents=True)
+    (tmp_path / "last.json").rename(tmp_path / discover.LAST_FILE)
+
+    rc = discover.run_discover(_args(ignore=["1-3"]))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "3 added to" in out and "Paper 2" in out
+    keys = discover.load_ignore(tmp_path / discover.IGNORE_FILE)
+    assert keys == {"10.1/p1", "w2", "10.1/p3"}

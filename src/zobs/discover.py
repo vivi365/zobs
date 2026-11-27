@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import sys
 import textwrap
@@ -38,6 +39,10 @@ CACHE_DIR = Path("references") / ".zobs-cache" / "augment"
 # Unlike the cache, this one is meant to be committed: a rejected suggestion
 # has to stay rejected across machines and across runs.
 IGNORE_FILE = Path("references") / ".zobs-ignore"
+
+# The list the last run printed, so `--ignore 1-25` means exactly the rows the
+# user just saw. Machine-local, so it lives next to the (gitignored) cache.
+LAST_FILE = Path("references") / ".zobs-cache" / "discover-last.json"
 
 _IGNORE_HEADER = (
     "# zobs discover: suggestions to never show again.\n"
@@ -332,6 +337,86 @@ def append_ignore(path: Path, keys: list[str]) -> list[str]:
     return added
 
 
+# ── ignoring by rank ────────────────────────────────────────────────────────
+
+_RANKS = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
+
+
+def is_rank_spec(raw: str) -> bool:
+    """'3', '1-25', '1,4,7-9'. A DOI always has a '/', an OpenAlex id a 'W'."""
+    return bool(_RANKS.match(str(raw).replace(" ", "")))
+
+
+def parse_ranks(spec: str) -> list[int]:
+    out: list[int] = []
+    for part in spec.replace(" ", "").split(","):
+        lo, _, hi = part.partition("-")
+        a, b = int(lo), int(hi or lo)
+        if a > b:
+            a, b = b, a
+        out.extend(n for n in range(a, b + 1) if n not in out)
+    return out
+
+
+def save_last(path: Path, rows: list[Discovery]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "rank": i,
+                        "key": d.doi or d.openalex_id,
+                        "title": d.metadata.title,
+                    }
+                    for i, d in enumerate(rows, 1)
+                ],
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass  # numbering is a convenience; DOIs and ids still work
+
+
+def load_last(path: Path) -> list[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def expand_ignore(raws: list[str], last: list[dict]) -> list[tuple[str, str]]:
+    """
+    ``--ignore`` arguments -> ``(key, title)`` pairs. Rank specs refer to the
+    list the last run printed; anything else is a DOI, OpenAlex id or link and
+    passes through with no title. Raises ValueError on a rank that run did not
+    show, so a typo never silently ignores the wrong paper.
+    """
+    by_rank = {int(r["rank"]): r for r in last if "rank" in r and "key" in r}
+    out: list[tuple[str, str]] = []
+    for raw in raws:
+        if not is_rank_spec(raw):
+            out.append((raw, ""))
+            continue
+        if not by_rank:
+            raise ValueError(
+                "no saved list to number from; run `zobs discover` first, "
+                "then `--ignore 1-25` refers to the rows it printed"
+            )
+        ranks = parse_ranks(raw)
+        missing = [n for n in ranks if n not in by_rank]
+        if missing:
+            raise ValueError(
+                f"the last run showed rows 1-{max(by_rank)}; "
+                f"no row {', '.join(map(str, missing))}"
+            )
+        out.extend((by_rank[n]["key"], by_rank[n].get("title", "")) for n in ranks)
+    return out
+
+
 # ── output ──────────────────────────────────────────────────────────────────
 
 
@@ -426,8 +511,8 @@ def render(rows: list[Discovery], cov: Coverage, args) -> None:
         print()
 
     print(
-        f"Not interested in one? `zobs discover --ignore {_url(rows[0])}` keeps it "
-        "out of future runs (the DOI or OpenAlex id alone works too)."
+        "Not interested? `zobs discover --ignore 3` (or `1-10`, `2,5,7`) keeps "
+        "those rows out of future runs; a DOI or link works too."
     )
 
 
@@ -469,14 +554,21 @@ def run_discover(args) -> int:
     ignore_path = Path.cwd() / IGNORE_FILE
 
     if args.ignore:
-        added = append_ignore(ignore_path, args.ignore)
-        skipped = len(args.ignore) - len(added)
+        try:
+            picked = expand_ignore(args.ignore, load_last(Path.cwd() / LAST_FILE))
+        except ValueError as e:
+            print(f"[error] {e}", file=sys.stderr)
+            return 1
+        titles = {normalise_key(k): t for k, t in picked}
+        added = append_ignore(ignore_path, [k for k, _ in picked])
+        skipped = len(picked) - len(added)
         print(
             f"{len(added)} added to {IGNORE_FILE}"
             + (f", {skipped} already there" if skipped else "")
         )
         for key in added:
-            print(f"  {key}")
+            title = titles.get(key, "")
+            print(f"  {key}" + (f"  {title}" if title else ""))
         return 0
 
     cfg = load_config()
@@ -515,6 +607,7 @@ def run_discover(args) -> int:
         limit=args.limit,
     )
 
+    save_last(Path.cwd() / LAST_FILE, rows)
     if args.as_json:
         print(as_json(rows, cov))
     else:

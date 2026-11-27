@@ -59,7 +59,8 @@ zobs discover [options]
   --min-count N      only suggest papers cited by at least N of yours (default: 2)
   --json             print the ranked suggestions as JSON
   --refresh          ignore the local API response cache
-  --ignore KEY       add an OpenAlex id or DOI to references/.zobs-ignore
+  --ignore KEY       add to references/.zobs-ignore: row numbers from the last
+                     run (3, 1-25, 2,5,7) or an OpenAlex id / DOI / link
                      and exit (repeatable)
 ```
 
@@ -83,8 +84,8 @@ Resolved 54/61 selection items; 48 had reference data (1904 references read).
       cited by 2 of your papers (119 globally):
         kimVUDDY2017, liVulPecker2016
 
-Not interested in one? `zobs discover --ignore https://doi.org/10.1109/tse.2006.28`
-keeps it out of future runs (the DOI or OpenAlex id alone works too).
+Not interested? `zobs discover --ignore 3` (or `1-10`, `2,5,7`) keeps those
+rows out of future runs; a DOI or link works too.
 ```
 
 Each block leads with the suggested paper: full title (wrapped, never
@@ -279,7 +280,13 @@ run), plus 4 to 8 batched candidate requests.
    `#` opens a comment, since a DOI may legally contain one.
 7. **`--ignore` appends and exits**, without running discovery. The feedback is
    immediate and unambiguous, and the follow-up `zobs discover` is nearly free
-   off the cache.
+   off the cache. It takes row numbers (`3`, `1-25`, `2,5,7-9`) as well as keys.
+   Every run saves the rows it printed to
+   `references/.zobs-cache/discover-last.json` (rank, DOI or OpenAlex id,
+   title), and a row number means that saved row, not whatever a fresh ranking
+   would put there. A number the last run did not show, or no saved list at all,
+   is an error. A rank spec is all digits, commas and dashes; a DOI always
+   contains `/` and an OpenAlex id starts with `W`, so the two never collide.
 8. **Read-only in v1.** No Zotero writes, no `refs.bib` writes, no PDF fetching.
    The ignore file is the only thing discover creates.
 9. **Coverage is always printed**, never suppressed, including in the

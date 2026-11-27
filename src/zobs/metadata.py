@@ -14,6 +14,7 @@ Sources, all keyless:
 
 from __future__ import annotations
 
+import html
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -44,14 +45,30 @@ class Metadata:
     event_place: str | None = None
     arxiv_id: str | None = None
     work_type: str | None = None  # journal | conference | preprint | book | report
+    openalex_id: str | None = None  # bare OpenAlex work id, e.g. "W2741809807"
+    cited_by_count: int | None = None  # global citation count, OpenAlex only
     authors: list[tuple[str, str]] = field(default_factory=list)  # (given, family)
+    referenced_works: list[str] = field(default_factory=list)  # bare OpenAlex ids
     source: str = ""
+
+    # Citation-graph fields describe the work's place in the literature, not the
+    # citation itself, so they are excluded below: a record carrying nothing but
+    # an OpenAlex id must still read as empty to `augment`.
+    _NOT_CITATION_DATA = {
+        "source",
+        "work_type",
+        "authors",
+        "title",
+        "openalex_id",
+        "cited_by_count",
+        "referenced_works",
+    }
 
     def is_empty(self) -> bool:
         return not any(
             getattr(self, f.name)
             for f in fields(self)
-            if f.name not in {"source", "work_type", "authors", "title"}
+            if f.name not in self._NOT_CITATION_DATA
         )
 
 
@@ -323,6 +340,30 @@ _OA_TYPE = {
 }
 
 
+_OA_ID = re.compile(r"^W\d+$", re.IGNORECASE)
+
+
+def openalex_id(value: str | None) -> str | None:
+    """``https://openalex.org/W123`` (or a bare id) -> ``W123``. None if neither."""
+    tail = str(value or "").rstrip("/").rsplit("/", 1)[-1].strip()
+    return tail if _OA_ID.match(tail) else None
+
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _clean(value) -> str | None:
+    """
+    OpenAlex text as a person would write it. Venue and title strings come
+    HTML-escaped ("Security and Privacy (S&amp;P)") and titles sometimes
+    carry markup ("<i>in vivo</i>"); unescape, drop tags, collapse spaces.
+    """
+    if value is None:
+        return None
+    text = " ".join(_TAG.sub("", html.unescape(str(value))).split())
+    return text or None
+
+
 def _from_openalex(work: dict) -> Metadata:
     biblio = work.get("biblio") or {}
     pages = None
@@ -333,26 +374,33 @@ def _from_openalex(work: dict) -> Metadata:
     loc = (work.get("primary_location") or {}).get("source") or {}
     authors = []
     for a in work.get("authorships", []):
-        name = (a.get("author") or {}).get("display_name") or a.get(
-            "raw_author_name", ""
+        name = _clean(
+            (a.get("author") or {}).get("display_name") or a.get("raw_author_name")
         )
-        given, _, family = name.rpartition(" ")
+        given, _, family = (name or "").rpartition(" ")
         authors.append((given, family))
     doi = (work.get("doi") or "").replace("https://doi.org/", "").lower() or None
     m = Metadata(
-        container_title=loc.get("display_name"),
+        container_title=_clean(loc.get("display_name")),
         issn=_first(loc.get("issn")),
         volume=biblio.get("volume"),
         issue=biblio.get("issue"),
         pages=pages,
         year=work.get("publication_year"),
         doi=doi,
-        publisher=loc.get("host_organization_name"),
+        publisher=_clean(loc.get("host_organization_name")),
         work_type=_OA_TYPE.get(work.get("type", ""), None),
+        openalex_id=openalex_id(work.get("id")),
+        cited_by_count=work.get("cited_by_count"),
         authors=authors,
+        referenced_works=[
+            wid
+            for wid in (openalex_id(r) for r in work.get("referenced_works") or [])
+            if wid
+        ],
         source="openalex",
     )
-    return _titled(m, work.get("title") or work.get("display_name") or "")
+    return _titled(m, _clean(work.get("title") or work.get("display_name")) or "")
 
 
 # ── queries ─────────────────────────────────────────────────────────────────
@@ -447,6 +495,30 @@ def openalex_search(title: str, cache: ResponseCache) -> list[Metadata]:
     url = f"https://api.openalex.org/works?filter=title.search:{_q(title)}&per_page=5"
     data = cache.fetch_json(url)
     return [_from_openalex(w) for w in (data or {}).get("results", [])]
+
+
+# OpenAlex accepts an OR-list of ids in one filter, capped at 50 values.
+OPENALEX_BATCH = 50
+
+
+def _chunks(seq: list[str], size: int) -> list[list[str]]:
+    return [seq[i : i + size] for i in range(0, len(seq), size)]
+
+
+def openalex_by_ids(ids: list[str], cache: ResponseCache) -> list[Metadata]:
+    """Fetch many works by OpenAlex id, ``OPENALEX_BATCH`` ids per request."""
+    wanted = [w for w in (openalex_id(i) for i in ids) if w]
+    out: list[Metadata] = []
+    for chunk in _chunks(wanted, OPENALEX_BATCH):
+        # ids are ``W\\d+``, so no escaping is needed and the URL stays a
+        # readable cache key
+        url = (
+            "https://api.openalex.org/works?"
+            f"filter=openalex_id:{'|'.join(chunk)}&per_page={len(chunk)}"
+        )
+        data = cache.fetch_json(url)
+        out.extend(_from_openalex(w) for w in (data or {}).get("results", []))
+    return out
 
 
 # ── top-level resolve ───────────────────────────────────────────────────────

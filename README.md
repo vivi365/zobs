@@ -107,6 +107,88 @@ its cache of API responses.
 
 ---
 
+## Finding papers you are missing
+
+`zobs discover` reads the reference list of every paper in your selection and
+looks for papers that several of them cite but that you do not have. If five of
+your sixty papers cite something and you have never added it, that is usually
+worth a look. This is backward snowballing, done for you.
+
+```bash
+uv run zobs discover                  # ranked list of what you are missing
+uv run zobs discover --min-count 4    # only things cited by 4+ of your papers
+uv run zobs discover --limit 50       # show more
+uv run zobs discover --json           # same results as JSON, for scripts / agents
+```
+
+Output looks like this:
+
+```
+Resolved 54/61 selection items; 48 had reference data (1904 references read).
+
+25 papers cited by at least 2 of your papers but not in your collection:
+
+   1. CP-Miner: finding copy-paste and related bugs in large-scale software code
+      Li et al. 2006 · IEEE Transactions on Software Engineering
+      https://doi.org/10.1109/tse.2006.28
+      cited by 3 of your papers (614 globally):
+        jangReDeBug2012, kimVUDDY2017, liVulPecker2016
+```
+
+Each block is one paper you do not have: its full title, who wrote it and
+where, and a link to open it. The citekeys under "cited by" are your own papers
+that cite it, so you can check the suggestion instead of taking it on faith.
+"globally" is its citation count everywhere.
+
+Results are not ranked by raw count. Raw count puts the famous papers on top,
+and those are usually the ones you have already decided to skip. A paper cited
+by 5 of your 60 with 200 citations worldwide ranks above one cited by the same 5
+with 40,000, because the first is specific to what you are reading and the
+second is cited by everyone.
+
+The first line is the honest version of how much was actually read. OpenAlex
+does not have reference lists for every paper, and its coverage of USENIX and
+NDSS is thinner than its coverage of ACM and IEEE, so a short list sometimes
+means missing data rather than nothing to find.
+
+### Seeing the last list again
+
+```bash
+uv run zobs discover --last           # reprint it, exactly as shown
+uv run zobs discover --last --json    # the same, as JSON
+```
+
+This reads the saved run from disk: no Zotero or network calls, so it is
+instant and works offline.
+
+### Dismissing suggestions
+
+Use the row numbers from the last run:
+
+```bash
+uv run zobs discover --ignore 3          # one row
+uv run zobs discover --ignore 1-25       # the whole list you just saw
+uv run zobs discover --ignore 2,5,7-9    # a mix
+```
+
+Or name a paper directly with its DOI, OpenAlex id, or the printed link:
+
+```bash
+uv run zobs discover --ignore 10.1109/tse.2006.28
+```
+
+Either way the papers go into `references/.zobs-ignore` and will not come back.
+Row numbers always mean the list the last `zobs discover` printed, and a number
+that run did not show is an error, not a guess. Unlike the cache, the ignore
+file is meant to be committed, so a decision you make once holds on every
+machine.
+
+`zobs discover` only reads. It does not add anything to Zotero, touch
+`refs.bib`, or download PDFs. It shares the cache with `zobs augment`, so if you
+have already run `augment` over the collection most of the lookups are free.
+
+---
+
 ## Obsidian integration (optional)
 
 Without `OBSIDIAN_NOTES`, the package still works: PDFs sync, `refs.bib` is

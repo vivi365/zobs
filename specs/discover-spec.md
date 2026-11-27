@@ -59,6 +59,7 @@ zobs discover [options]
   --min-count N      only suggest papers cited by at least N of yours (default: 2)
   --json             print the ranked suggestions as JSON
   --refresh          ignore the local API response cache
+  --last             reprint the last run from disk (no Zotero, no network)
   --ignore KEY       add to references/.zobs-ignore: row numbers from the last
                      run (3, 1-25, 2,5,7) or an OpenAlex id / DOI / link
                      and exit (repeatable)
@@ -281,9 +282,10 @@ run), plus 4 to 8 batched candidate requests.
 7. **`--ignore` appends and exits**, without running discovery. The feedback is
    immediate and unambiguous, and the follow-up `zobs discover` is nearly free
    off the cache. It takes row numbers (`3`, `1-25`, `2,5,7-9`) as well as keys.
-   Every run saves the rows it printed to
-   `references/.zobs-cache/discover-last.json` (rank, DOI or OpenAlex id,
-   title), and a row number means that saved row, not whatever a fresh ranking
+   Every run saves what it printed to
+   `references/.zobs-cache/discover-last.json` (the `--json` payload plus
+   `minCount`), and `--last` reprints it without touching Zotero or the
+   network. A row number means that saved row, not whatever a fresh ranking
    would put there. A number the last run did not show, or no saved list at all,
    is an error. A rank spec is all digits, commas and dashes; a DOI always
    contains `/` and an OpenAlex id starts with `W`, so the two never collide.

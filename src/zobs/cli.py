@@ -118,6 +118,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--refresh", action="store_true", help="ignore the local API response cache"
     )
     dis.add_argument(
+        "--last",
+        action="store_true",
+        help="reprint the last run's list (no Zotero or network calls)",
+    )
+    dis.add_argument(
         "--ignore",
         action="append",
         metavar="KEY",

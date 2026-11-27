@@ -125,6 +125,16 @@ does not have reference lists for every paper, and its coverage of USENIX and
 NDSS is thinner than its coverage of ACM and IEEE, so a short list sometimes
 means missing data rather than nothing to find.
 
+### Seeing the last list again
+
+```bash
+uv run zobs discover --last           # reprint it, exactly as shown
+uv run zobs discover --last --json    # the same, as JSON
+```
+
+This reads the saved run from disk: no Zotero or network calls, so it is
+instant and works offline.
+
 ### Dismissing suggestions
 
 Use the row numbers from the last run:

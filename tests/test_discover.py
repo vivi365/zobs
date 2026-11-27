@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 import pytest
 
@@ -9,7 +10,9 @@ from zobs.metadata import Metadata
 
 
 def _args(**over):
-    base = dict(limit=25, min_count=2, as_json=False, refresh=False, ignore=None)
+    base = dict(
+        limit=25, min_count=2, as_json=False, refresh=False, ignore=None, last=False
+    )
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -374,7 +377,8 @@ def _saved(tmp_path, n=3):
     ]
     rows[1].metadata.doi = None  # row 2 is known only by its OpenAlex id
     path = tmp_path / "last.json"
-    discover.save_last(path, rows)
+    cov = discover.Coverage(total=5, resolved=5, with_refs=5, references=50)
+    discover.save_last(path, rows, cov, 2)
     return path
 
 
@@ -422,3 +426,77 @@ def test_ignore_by_rank_in_the_wrong_folder_names_the_path(
     err = capsys.readouterr().err
     assert str(tmp_path / discover.LAST_FILE) in err
     assert not (tmp_path / discover.IGNORE_FILE).exists()
+
+
+# ── --last ──────────────────────────────────────────────────────────────────
+
+
+def _install_last(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    saved = _saved(tmp_path)
+    (tmp_path / discover.LAST_FILE).parent.mkdir(parents=True)
+    saved.rename(tmp_path / discover.LAST_FILE)
+
+
+def test_last_reprints_the_run_as_it_was_shown(tmp_path, monkeypatch, capsys) -> None:
+    rows = [
+        discover.Discovery(
+            "W1",
+            ["alpha", "beta"],
+            Metadata(
+                title="Paper One",
+                container_title="IEEE S&P",
+                year=2015,
+                doi="10.1/p1",
+                cited_by_count=181,
+                authors=[("Antonio", "Nappa"), ("X", "Y")],
+            ),
+        )
+    ]
+    cov = discover.Coverage(
+        total=4, resolved=3, with_refs=3, references=30, duplicates=[["a", "a2"]]
+    )
+    discover.render(rows, cov, _args())
+    original = capsys.readouterr().out
+
+    monkeypatch.chdir(tmp_path)
+    discover.save_last(tmp_path / discover.LAST_FILE, rows, cov, 2)
+    assert discover.run_discover(_args(last=True)) == 0
+    out = capsys.readouterr().out
+
+    assert out.startswith("Last `zobs discover` run, ")
+    assert out.split("\n", 1)[1] == original  # identical, block for block
+
+
+def test_last_needs_no_zotero_config(tmp_path, monkeypatch, capsys) -> None:
+    _install_last(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        discover, "load_config", lambda: pytest.fail("--last must not read .env")
+    )
+    assert discover.run_discover(_args(last=True)) == 0
+    assert "Paper 2" in capsys.readouterr().out
+
+
+def test_last_json_carries_ranks(tmp_path, monkeypatch, capsys) -> None:
+    _install_last(tmp_path, monkeypatch)
+    assert discover.run_discover(_args(last=True, as_json=True)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [c["rank"] for c in payload["candidates"]] == [1, 2, 3]
+
+
+def test_last_without_a_saved_run_names_the_path(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert discover.run_discover(_args(last=True)) == 1
+    assert str(tmp_path / discover.LAST_FILE) in capsys.readouterr().err
+
+
+def test_first_format_saved_list_still_works(tmp_path, monkeypatch, capsys) -> None:
+    # regression: lists saved before --last kept only rank/key/title
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / discover.LAST_FILE
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps([{"rank": 1, "key": "10.1/old", "title": "Old"}]))
+    assert discover.run_discover(_args(last=True)) == 0
+    assert "1. Old  10.1/old" in capsys.readouterr().out
+    assert discover.run_discover(_args(ignore=["1"])) == 0
+    assert discover.load_ignore(tmp_path / discover.IGNORE_FILE) == {"10.1/old"}

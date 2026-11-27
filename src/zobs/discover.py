@@ -15,6 +15,7 @@ See specs/discover-spec.md for the design.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
@@ -22,6 +23,7 @@ import shutil
 import sys
 import textwrap
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from pyzotero import errors as zotero_errors, zotero
@@ -358,34 +360,72 @@ def parse_ranks(spec: str) -> list[int]:
     return out
 
 
-def save_last(path: Path, rows: list[Discovery]) -> None:
+def save_last(path: Path, rows: list[Discovery], cov: Coverage, min_count: int) -> None:
+    """Keep the run as printed, for `--last` and for `--ignore <row numbers>`."""
+    payload = {"version": 2, "minCount": min_count, **_payload(rows, cov)}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                [
-                    {
-                        "rank": i,
-                        "key": d.doi or d.openalex_id,
-                        "title": d.metadata.title,
-                    }
-                    for i, d in enumerate(rows, 1)
-                ],
-                ensure_ascii=False,
-                indent=1,
-            ),
-            encoding="utf-8",
-        )
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), "utf-8")
     except OSError:
-        pass  # numbering is a convenience; DOIs and ids still work
+        pass  # a convenience; DOIs and ids still work for --ignore
+
+
+def load_saved(path: Path) -> dict | list | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def load_last(path: Path) -> list[dict]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    """The last run's rows as ``{rank, key, title}``, whichever format saved them."""
+    data = load_saved(path)
+    if isinstance(data, list):  # first format: the rows themselves
+        return data
+    if not isinstance(data, dict):
         return []
-    return data if isinstance(data, list) else []
+    return [
+        {
+            "rank": c["rank"],
+            "key": c.get("doi") or c.get("openalexID"),
+            "title": c.get("title", ""),
+        }
+        for c in data.get("candidates", [])
+        if "rank" in c
+    ]
+
+
+def from_saved(data: dict) -> tuple[list[Discovery], Coverage, int]:
+    """Rebuild a saved run so `--last` prints it exactly as `render` did."""
+    rows = []
+    for c in data.get("candidates", []):
+        first = c.get("firstAuthor") or ""
+        # only the first author's name and the author count are shown, so the
+        # rest of the list is placeholders that just carry the count
+        authors = [("", first)] + [("", "")] * max(
+            int(c.get("authorCount") or 1) - 1, 0
+        )
+        meta = md.Metadata(
+            title=c.get("title") or "",
+            container_title=c.get("venue"),
+            year=c.get("year"),
+            doi=c.get("doi"),
+            openalex_id=c.get("openalexID"),
+            cited_by_count=c.get("citedByGlobal"),
+            authors=authors if first else [],
+        )
+        rows.append(
+            Discovery(c.get("openalexID") or "", list(c.get("via") or []), meta)
+        )
+    cv = data.get("coverage") or {}
+    cov = Coverage(
+        total=cv.get("selected", 0),
+        resolved=cv.get("resolved", 0),
+        with_refs=cv.get("withReferences", 0),
+        references=cv.get("referencesRead", 0),
+        duplicates=cv.get("duplicates") or [],
+    )
+    return rows, cov, int(data.get("minCount") or 2)
 
 
 def expand_ignore(
@@ -520,35 +560,38 @@ def render(rows: list[Discovery], cov: Coverage, args) -> None:
     )
 
 
-def as_json(rows: list[Discovery], cov: Coverage) -> str:
-    return json.dumps(
-        {
-            "coverage": {
-                "selected": cov.total,
-                "resolved": cov.resolved,
-                "withReferences": cov.with_refs,
-                "referencesRead": cov.references,
-                "duplicates": cov.duplicates,
-            },
-            "candidates": [
-                {
-                    "openalexID": d.openalex_id,
-                    "title": d.metadata.title,
-                    "firstAuthor": d.first_author or None,
-                    "year": d.metadata.year,
-                    "venue": d.metadata.container_title,
-                    "doi": d.doi or None,
-                    "url": _url(d),
-                    "citedByHeld": d.count,
-                    "citedByGlobal": d.cited_by_count,
-                    "score": round(d.score, 4),
-                    "via": d.citekeys,
-                }
-                for d in rows
-            ],
+def _payload(rows: list[Discovery], cov: Coverage) -> dict:
+    return {
+        "coverage": {
+            "selected": cov.total,
+            "resolved": cov.resolved,
+            "withReferences": cov.with_refs,
+            "referencesRead": cov.references,
+            "duplicates": cov.duplicates,
         },
-        indent=2,
-    )
+        "candidates": [
+            {
+                "rank": i,
+                "openalexID": d.openalex_id,
+                "title": d.metadata.title,
+                "firstAuthor": d.first_author or None,
+                "authorCount": len(d.metadata.authors),
+                "year": d.metadata.year,
+                "venue": d.metadata.container_title,
+                "doi": d.doi or None,
+                "url": _url(d),
+                "citedByHeld": d.count,
+                "citedByGlobal": d.cited_by_count,
+                "score": round(d.score, 4),
+                "via": d.citekeys,
+            }
+            for i, d in enumerate(rows, 1)
+        ],
+    }
+
+
+def as_json(rows: list[Discovery], cov: Coverage) -> str:
+    return json.dumps(_payload(rows, cov), indent=2)
 
 
 # ── entry point ─────────────────────────────────────────────────────────────
@@ -575,6 +618,9 @@ def run_discover(args) -> int:
             title = titles.get(key, "")
             print(f"  {key}" + (f"  {title}" if title else ""))
         return 0
+
+    if args.last:
+        return show_last(Path.cwd() / LAST_FILE, args)
 
     cfg = load_config()
     zot = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
@@ -612,9 +658,39 @@ def run_discover(args) -> int:
         limit=args.limit,
     )
 
-    save_last(Path.cwd() / LAST_FILE, rows)
+    save_last(Path.cwd() / LAST_FILE, rows, cov, args.min_count)
     if args.as_json:
         print(as_json(rows, cov))
     else:
         render(rows, cov, args)
+    return 0
+
+
+def show_last(path: Path, args) -> int:
+    """`--last`: reprint the previous run from disk. No Zotero, no network."""
+    data = load_saved(path)
+    if data is None:
+        print(
+            f"[error] no saved run (looked for {path}). Run `zobs discover` in "
+            "this project folder first.",
+            file=sys.stderr,
+        )
+        return 1
+    if isinstance(data, list):  # first format kept only rank, key and title
+        if args.as_json:
+            print(json.dumps(data, indent=2))
+            return 0
+        for r in data:
+            print(
+                f"  {r.get('rank', '?'):>2}. {r.get('title', '')}  {r.get('key', '')}"
+            )
+        print("\n(saved by an older zobs; run `zobs discover` once for the full view)")
+        return 0
+    if args.as_json:
+        print(json.dumps({k: v for k, v in data.items() if k != "version"}, indent=2))
+        return 0
+    rows, cov, min_count = from_saved(data)
+    when = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    print(f"Last `zobs discover` run, {when}:")
+    render(rows, cov, argparse.Namespace(min_count=min_count))
     return 0

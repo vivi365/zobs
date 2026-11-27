@@ -388,7 +388,9 @@ def load_last(path: Path) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-def expand_ignore(raws: list[str], last: list[dict]) -> list[tuple[str, str]]:
+def expand_ignore(
+    raws: list[str], last: list[dict], where: Path | None = None
+) -> list[tuple[str, str]]:
     """
     ``--ignore`` arguments -> ``(key, title)`` pairs. Rank specs refer to the
     list the last run printed; anything else is a DOI, OpenAlex id or link and
@@ -402,9 +404,11 @@ def expand_ignore(raws: list[str], last: list[dict]) -> list[tuple[str, str]]:
             out.append((raw, ""))
             continue
         if not by_rank:
+            looked = f" (looked for {where})" if where else ""
             raise ValueError(
-                "no saved list to number from; run `zobs discover` first, "
-                "then `--ignore 1-25` refers to the rows it printed"
+                f"no saved list to number from{looked}. Run `zobs discover` in "
+                "this project folder first; `--ignore 1-25` then refers to the "
+                "rows it printed"
             )
         ranks = parse_ranks(raw)
         missing = [n for n in ranks if n not in by_rank]
@@ -555,7 +559,8 @@ def run_discover(args) -> int:
 
     if args.ignore:
         try:
-            picked = expand_ignore(args.ignore, load_last(Path.cwd() / LAST_FILE))
+            last_path = Path.cwd() / LAST_FILE
+            picked = expand_ignore(args.ignore, load_last(last_path), last_path)
         except ValueError as e:
             print(f"[error] {e}", file=sys.stderr)
             return 1

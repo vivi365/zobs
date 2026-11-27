@@ -392,7 +392,7 @@ def test_expand_ignore_refuses_rows_it_did_not_show(tmp_path) -> None:
     last = discover.load_last(_saved(tmp_path))
     with pytest.raises(ValueError, match="no row 4"):
         discover.expand_ignore(["2-4"], last)
-    with pytest.raises(ValueError, match="run `zobs discover` first"):
+    with pytest.raises(ValueError, match="no saved list to number from"):
         discover.expand_ignore(["1"], [])
 
 
@@ -409,3 +409,16 @@ def test_ignore_by_rank_end_to_end(tmp_path, monkeypatch, capsys) -> None:
     assert "3 added to" in out and "Paper 2" in out
     keys = discover.load_ignore(tmp_path / discover.IGNORE_FILE)
     assert keys == {"10.1/p1", "w2", "10.1/p3"}
+
+
+def test_ignore_by_rank_in_the_wrong_folder_names_the_path(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    # regression: run from a folder with no saved list, the error has to say
+    # where it looked, and nothing may be written there
+    monkeypatch.chdir(tmp_path)
+    rc = discover.run_discover(_args(ignore=["1-25"]))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert str(tmp_path / discover.LAST_FILE) in err
+    assert not (tmp_path / discover.IGNORE_FILE).exists()

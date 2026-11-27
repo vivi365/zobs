@@ -6,8 +6,10 @@ Obsidian notes into references/notes/ using the Better BibTeX cite key
 stored in each note's frontmatter.
 
 Configuration (via .env in the project root):
-    ZOTERO_USER_ID    — numeric Zotero user ID
+    ZOTERO_USER_ID    — numeric Zotero user ID (library type user)
     ZOTERO_API_KEY    — Zotero API key
+    ZOTERO_LIBRARY_TYPE — library to sync: user (default) or group
+    ZOTERO_GROUP_ID   — numeric Zotero group ID (library type group)
     ZOTERO_SYNC_MODE  — selection mode: collection (default) or tag
     ZOTERO_COLLECTION — collection name or 8-char key (mode=collection)
     ZOTERO_TAG        — tag name or comma-separated list (mode=tag)
@@ -26,7 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pyzotero import zotero, errors as zotero_errors
 
-from zobs.selector import SelectorError, ZoteroClient, parse_selector
+from zobs.selector import SelectorError, ZoteroClient, _is_missing, parse_selector
 
 # Config
 
@@ -39,15 +41,22 @@ def load_config() -> dict:
     """Load and validate configuration from .env in the current working directory."""
     load_dotenv(Path.cwd() / ".env")
 
-    required = ("ZOTERO_USER_ID", "ZOTERO_API_KEY")
+    type_raw = os.environ.get("ZOTERO_LIBRARY_TYPE")
+    library_type = "user" if _is_missing(type_raw) else type_raw.strip().lower()
+    if library_type not in {"user", "group"}:
+        print(
+            f"[error] Invalid ZOTERO_LIBRARY_TYPE '{library_type}'. "
+            "Expected 'user' or 'group'."
+        )
+        print("        Copy .env.example to .env and fill in your credentials.")
+        sys.exit(1)
+
+    # A group library is addressed by its group ID; the personal user ID is
+    # irrelevant there, so don't demand it.
+    id_var = "ZOTERO_GROUP_ID" if library_type == "group" else "ZOTERO_USER_ID"
+    required = (id_var, "ZOTERO_API_KEY")
     raw_values = {k: os.environ.get(k) for k in required}
-    missing = []
-    for k, v in raw_values.items():
-        if not v or not v.strip():
-            missing.append(k)
-            continue
-        if v.lstrip().startswith("#"):
-            missing.append(k)
+    missing = [k for k, v in raw_values.items() if _is_missing(v)]
     if missing:
         print(f"[error] Missing required .env variables: {', '.join(missing)}")
         print("        Copy .env.example to .env and fill in your credentials.")
@@ -65,7 +74,8 @@ def load_config() -> dict:
     bbt_url_raw = os.environ.get("ZOTERO_BBT_URL")
     bbt_url_raw = bbt_url_raw.strip() if bbt_url_raw else None
     return {
-        "user_id": raw_values["ZOTERO_USER_ID"].strip(),
+        "library_id": raw_values[id_var].strip(),
+        "library_type": library_type,
         "api_key": raw_values["ZOTERO_API_KEY"].strip(),
         "selector": selector,
         "storage": Path(
@@ -325,7 +335,9 @@ def main() -> None:
         print(f"  Found {len(obsidian_index)} notes with zotero_key.\n")
 
     # Zotero sync
-    zot: ZoteroClient = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
+    zot: ZoteroClient = zotero.Zotero(
+        cfg["library_id"], cfg["library_type"], cfg["api_key"]
+    )
     try:
         items, children_by_parent = cfg["selector"].fetch_items(zot, ITEM_TYPES)
     except ValueError as e:

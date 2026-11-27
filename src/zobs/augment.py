@@ -334,13 +334,22 @@ def _push(zot, plan: Plan) -> bool:
         return False
 
 
-def _has_write_access(zot) -> bool:
+def _has_write_access(zot, library_type: str = "user", library_id: str = "") -> bool:
     try:
         info = zot.key_info()
     except Exception:  # noqa: BLE001 - fall through to the real update
         return True
-    access = (info or {}).get("access", {}).get("user", {})
-    return bool(access.get("write") or access.get("library"))
+    access = (info or {}).get("access", {}) or {}
+    if library_type == "group":
+        # A group key grants per-group privileges, with "all" as the catch-all
+        # for groups not listed individually.
+        groups = access.get("groups", {}) or {}
+        key = str(library_id)
+        grant = groups[key] if key in groups else groups.get("all", {})
+    else:
+        grant = access.get("user", {})
+    grant = grant or {}
+    return bool(grant.get("write") or grant.get("library"))
 
 
 # ── entry point ─────────────────────────────────────────────────────────────
@@ -348,7 +357,7 @@ def _has_write_access(zot) -> bool:
 
 def run_augment(args) -> int:
     cfg = load_config()
-    zot = zotero.Zotero(cfg["user_id"], "user", cfg["api_key"])
+    zot = zotero.Zotero(cfg["library_id"], cfg["library_type"], cfg["api_key"])
 
     try:
         cands = collect(cfg, zot)
@@ -440,7 +449,7 @@ def run_augment(args) -> int:
 
     pushed = failed = 0
     if not args.no_zotero:
-        if not _has_write_access(zot):
+        if not _has_write_access(zot, cfg["library_type"], cfg["library_id"]):
             print(
                 "[error] ZOTERO_API_KEY has no write access — enable it at "
                 "zotero.org/settings/keys, or re-run with --no-zotero.",

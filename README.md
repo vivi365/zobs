@@ -17,8 +17,10 @@ Use the `.env.example` to create your `.env` config
 
 | Variable | Required | Description |
 |---|---|---|
-| `ZOTERO_USER_ID` | yes | Numeric Zotero user ID (visible in your Zotero profile URL) |
+| `ZOTERO_USER_ID` | yes (type=user) | Numeric Zotero user ID (visible in your Zotero profile URL) |
 | `ZOTERO_API_KEY` | yes | Create at zotero.org/settings/keys |
+| `ZOTERO_LIBRARY_TYPE` | no | `user` (default) or `group` (see below) |
+| `ZOTERO_GROUP_ID` | yes (type=group) | Numeric Zotero group ID |
 | `ZOTERO_SYNC_MODE` | no | `collection` (default) or `tag` |
 | `ZOTERO_COLLECTION` | yes (mode=collection) | Collection name or 8-char key (ID) to sync |
 | `ZOTERO_TAG` | yes (mode=tag) | Tag name or comma-separated list (AND logic) |
@@ -32,6 +34,30 @@ Sync pdfs and notes:
 ```bash
 uv run zobs
 ```
+
+---
+
+## Group libraries
+
+By default `zobs` syncs your personal library. To sync a shared group library
+instead, set the library type and the group ID:
+
+```
+ZOTERO_LIBRARY_TYPE=group
+ZOTERO_GROUP_ID=1234567
+```
+
+The group ID is the number in the group URL,
+`https://www.zotero.org/groups/<group-id>/<group-name>`. In group mode
+`ZOTERO_USER_ID` is not used and does not need to be set; `ZOTERO_API_KEY`
+is still required, and it must be a key with access to that group.
+`ZOTERO_COLLECTION` and `ZOTERO_TAG` then refer to collections and tags in
+the group library.
+
+Everything else works the same. Group attachments live in the same local
+`~/Zotero/storage` folder as personal ones, so `ZOTERO_STORAGE` is unchanged.
+`zobs augment` writes back to the group when the API key has write access
+to it.
 
 ---
 

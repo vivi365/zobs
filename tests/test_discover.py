@@ -312,6 +312,38 @@ def test_json_output_carries_coverage_and_evidence() -> None:
         "resolved": 54,
         "withReferences": 48,
         "referencesRead": 1900,
+        "duplicates": [],
     }
     assert payload["candidates"][0]["via"] == ["alpha", "beta"]
     assert payload["candidates"][0]["citedByGlobal"] == 200
+
+
+def test_duplicate_zotero_items_count_once() -> None:
+    held = [
+        discover.Held("liStudy2017a", "K1", "Study", "", "W1", ["W7", "W8"]),
+        discover.Held("liStudy2017", "K2", "Study", "", "W1", ["W7", "W8"]),
+        discover.Held("beta", "K3", "Beta", "", "W2", ["W7"]),
+        discover.Held("gamma", "K4", "Gamma", "", None, []),
+    ]
+    unique, dups = discover.dedupe(held)
+    # the unsuffixed citekey is kept, the original order otherwise preserved
+    assert [h.citekey for h in unique] == ["liStudy2017", "beta", "gamma"]
+    assert dups == [["liStudy2017", "liStudy2017a"]]
+    index = discover.build_index(unique)
+    assert index["W7"] == {"liStudy2017", "beta"}  # 2, not 3
+    assert index["W8"] == {"liStudy2017"}  # below --min-count 2 now
+
+
+def test_render_lists_duplicates(capsys) -> None:
+    cov = discover.Coverage(
+        total=3,
+        resolved=3,
+        with_refs=3,
+        references=9,
+        duplicates=[["liStudy2017", "liStudy2017a"]],
+    )
+    row = discover.Discovery("W7", ["beta", "liStudy2017"], Metadata(title="T"))
+    discover.render([row], cov, _args())
+    out = capsys.readouterr().out
+    assert "1 paper is in your selection more than once" in out
+    assert "liStudy2017 = liStudy2017a" in out

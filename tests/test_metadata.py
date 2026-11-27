@@ -197,3 +197,22 @@ def test_resolve_no_match_returns_none() -> None:
         min_ratio=93,
     )
     assert res.tier == "none" and res.metadata is None
+
+
+def test_from_openalex_unescapes_html_in_text() -> None:
+    work = {
+        "id": "https://openalex.org/W1",
+        "title": "Finding <i>in vivo</i> bugs &amp; fixes",
+        "primary_location": {
+            "source": {
+                "display_name": "IEEE Symposium on Security and Privacy (S&amp;P)",
+                "host_organization_name": "Institute of Electrical &amp; Electronics",
+            }
+        },
+        "authorships": [{"author": {"display_name": "Ana  Mar&iacute;a Ruiz"}}],
+    }
+    m = md._from_openalex(work)
+    assert m.title == "Finding in vivo bugs & fixes"
+    assert m.container_title == "IEEE Symposium on Security and Privacy (S&P)"
+    assert m.publisher == "Institute of Electrical & Electronics"
+    assert m.authors == [("Ana María", "Ruiz")]

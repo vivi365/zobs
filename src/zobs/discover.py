@@ -127,6 +127,32 @@ def resolve_selection(cands, cache, *, quiet: bool = False) -> list[Held]:
     return held
 
 
+def dedupe(held: list[Held]) -> tuple[list[Held], list[list[str]]]:
+    """
+    One entry per OpenAlex work, so a paper that sits in Zotero twice
+    ("liStudy2017" and "liStudy2017a") counts once toward everything it cites.
+
+    Returns the kept papers, in their original order, and the duplicate groups
+    as citekey lists, kept citekey first. The kept one is the alphabetically
+    first citekey, which is the unsuffixed one when Better BibTeX added "a".
+    Unresolved papers have no reference list and are kept as they are.
+    """
+    groups: dict[str, list[Held]] = {}
+    for h in held:
+        if h.openalex_id:
+            groups.setdefault(h.openalex_id.lower(), []).append(h)
+    keep = {id(min(g, key=lambda h: h.citekey)) for g in groups.values()}
+    kept = [h for h in held if not h.openalex_id or id(h) in keep]
+    dups = []
+    for g in groups.values():
+        if len(g) > 1:
+            first = min(g, key=lambda h: h.citekey)
+            dups.append(
+                [first.citekey] + sorted(h.citekey for h in g if h is not first)
+            )
+    return kept, sorted(dups)
+
+
 def build_index(held: list[Held]) -> dict[str, set[str]]:
     """``openalex_id -> citekeys in the collection that reference it``.
 
@@ -315,6 +341,7 @@ class Coverage:
     resolved: int
     with_refs: int
     references: int
+    duplicates: list[list[str]] = field(default_factory=list)
 
     def line(self) -> str:
         return (
@@ -373,6 +400,14 @@ def render(rows: list[Discovery], cov: Coverage, args) -> None:
             )
         return
 
+    if cov.duplicates:
+        n = len(cov.duplicates)
+        print(
+            f"{n} paper{'' if n == 1 else 's'} {'is' if n == 1 else 'are'} in your "
+            "selection more than once; each is counted once:"
+        )
+        for group in cov.duplicates:
+            print(f"  {' = '.join(group)}")
     print(
         f"\n{len(rows)} paper{'' if len(rows) == 1 else 's'} cited by at least "
         f"{args.min_count} of your papers but not in your collection:\n"
@@ -404,6 +439,7 @@ def as_json(rows: list[Discovery], cov: Coverage) -> str:
                 "resolved": cov.resolved,
                 "withReferences": cov.with_refs,
                 "referencesRead": cov.references,
+                "duplicates": cov.duplicates,
             },
             "candidates": [
                 {
@@ -459,12 +495,14 @@ def run_discover(args) -> int:
         print(f"Reading the reference lists of {len(cands)} papers...")
 
     held = resolve_selection(cands, cache, quiet=args.as_json)
-    index = build_index(held)
+    unique, duplicates = dedupe(held)
+    index = build_index(unique)
     cov = Coverage(
         total=len(held),
         resolved=sum(1 for h in held if h.resolved),
         with_refs=sum(1 for h in held if h.has_refs),
-        references=sum(len(h.referenced_works) for h in held),
+        references=sum(len(h.referenced_works) for h in unique),
+        duplicates=duplicates,
     )
 
     rows = rank(

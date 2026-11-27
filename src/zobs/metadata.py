@@ -14,6 +14,7 @@ Sources, all keyless:
 
 from __future__ import annotations
 
+import html
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -348,6 +349,21 @@ def openalex_id(value: str | None) -> str | None:
     return tail if _OA_ID.match(tail) else None
 
 
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _clean(value) -> str | None:
+    """
+    OpenAlex text as a person would write it. Venue and title strings come
+    HTML-escaped ("Security and Privacy (S&amp;P)") and titles sometimes
+    carry markup ("<i>in vivo</i>"); unescape, drop tags, collapse spaces.
+    """
+    if value is None:
+        return None
+    text = " ".join(_TAG.sub("", html.unescape(str(value))).split())
+    return text or None
+
+
 def _from_openalex(work: dict) -> Metadata:
     biblio = work.get("biblio") or {}
     pages = None
@@ -358,21 +374,21 @@ def _from_openalex(work: dict) -> Metadata:
     loc = (work.get("primary_location") or {}).get("source") or {}
     authors = []
     for a in work.get("authorships", []):
-        name = (a.get("author") or {}).get("display_name") or a.get(
-            "raw_author_name", ""
+        name = _clean(
+            (a.get("author") or {}).get("display_name") or a.get("raw_author_name")
         )
-        given, _, family = name.rpartition(" ")
+        given, _, family = (name or "").rpartition(" ")
         authors.append((given, family))
     doi = (work.get("doi") or "").replace("https://doi.org/", "").lower() or None
     m = Metadata(
-        container_title=loc.get("display_name"),
+        container_title=_clean(loc.get("display_name")),
         issn=_first(loc.get("issn")),
         volume=biblio.get("volume"),
         issue=biblio.get("issue"),
         pages=pages,
         year=work.get("publication_year"),
         doi=doi,
-        publisher=loc.get("host_organization_name"),
+        publisher=_clean(loc.get("host_organization_name")),
         work_type=_OA_TYPE.get(work.get("type", ""), None),
         openalex_id=openalex_id(work.get("id")),
         cited_by_count=work.get("cited_by_count"),
@@ -384,7 +400,7 @@ def _from_openalex(work: dict) -> Metadata:
         ],
         source="openalex",
     )
-    return _titled(m, work.get("title") or work.get("display_name") or "")
+    return _titled(m, _clean(work.get("title") or work.get("display_name")) or "")
 
 
 # ── queries ─────────────────────────────────────────────────────────────────

@@ -258,8 +258,35 @@ def test_render_names_the_citing_papers(capsys) -> None:
     discover.render([row], cov, _args())
     out = capsys.readouterr().out
     assert "Resolved 54/61 selection items; 48 had reference data" in out
-    assert "via alpha, beta" in out
-    assert "10.1/niche" in out
+    # the suggestion leads, untruncated, with a link that opens it
+    assert "   1. A Niche Workshop Paper" in out
+    assert "Woo 2019 · WOOT" in out
+    assert "https://doi.org/10.1/niche" in out
+    # the citekeys are labelled as the user's own citing papers
+    assert "cited by 2 of your papers (200 globally):" in out
+    assert "alpha, beta" in out
+    assert out.index("A Niche Workshop Paper") < out.index("alpha, beta")
+
+
+def test_render_keeps_long_titles_and_links_openalex_without_doi(capsys) -> None:
+    title = "A Very Long Title " * 8
+    row = discover.Discovery(
+        "W9",
+        ["alpha", "beta"],
+        Metadata(title=title.strip(), year=2020, authors=[("A", "B"), ("C", "D")]),
+    )
+    cov = discover.Coverage(total=2, resolved=2, with_refs=2, references=10)
+    discover.render([row], cov, _args())
+    out = capsys.readouterr().out
+    assert " ".join(out.split()).count("A Very Long Title") == 8  # never clipped
+    assert "…" not in out
+    assert "B et al. 2020" in out
+    assert "https://openalex.org/W9" in out
+
+
+def test_ignore_accepts_the_printed_link() -> None:
+    assert discover.normalise_key("https://doi.org/10.1/Niche") == "10.1/niche"
+    assert discover.normalise_key("https://openalex.org/W9") == "w9"
 
 
 def test_render_says_so_when_there_is_nothing(capsys) -> None:

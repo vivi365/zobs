@@ -100,15 +100,19 @@ Output looks like this:
 ```
 Resolved 54/61 selection items; 48 had reference data (1904 references read).
 
-   #  cited   global  year  first author      venue                 title
-   1      3      614  2006  Li                IEEE Transactions o…  CP-Miner: finding copy-paste and related bugs…
-      via jangReDeBug2012, kimVUDDY2017, liVulPecker2016
-      doi 10.1109/tse.2006.28
+25 papers cited by at least 2 of your papers but not in your collection:
+
+   1. CP-Miner: finding copy-paste and related bugs in large-scale software code
+      Li et al. 2006 · IEEE Transactions on Software Engineering
+      https://doi.org/10.1109/tse.2006.28
+      cited by 3 of your papers (614 globally):
+        jangReDeBug2012, kimVUDDY2017, liVulPecker2016
 ```
 
-`cited` is how many of your own papers cite it, `global` is its total citation
-count everywhere. The `via` line names which of your papers cite it, so you can
-check the suggestion instead of taking it on faith.
+Each block is one paper you do not have: its full title, who wrote it and
+where, and a link to open it. The citekeys under "cited by" are your own papers
+that cite it, so you can check the suggestion instead of taking it on faith.
+"globally" is its citation count everywhere.
 
 Results are not ranked by raw count. Raw count puts the famous papers on top,
 and those are usually the ones you have already decided to skip. A paper cited

@@ -19,6 +19,7 @@ import json
 import math
 import shutil
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -323,19 +324,38 @@ class Coverage:
         )
 
 
-def _clip(s: str, width: int) -> str:
-    s = " ".join((s or "").split())
-    return s if len(s) <= width else s[: width - 1] + "…"
+_INDENT = " " * 6
 
 
-def _via(citekeys: list[str], budget: int) -> str:
-    shown: list[str] = []
-    for ck in citekeys:
-        if shown and len(", ".join(shown)) + len(ck) + 2 > budget:
-            break
-        shown.append(ck)
-    rest = len(citekeys) - len(shown)
-    return ", ".join(shown) + (f" (+{rest} more)" if rest else "")
+def _wrap(text: str, width: int, first: str, rest: str | None = None) -> str:
+    lines = textwrap.wrap(
+        " ".join((text or "").split()),
+        width=width,
+        initial_indent=first,
+        subsequent_indent=first if rest is None else rest,
+        break_on_hyphens=False,
+        break_long_words=False,
+    )
+    return "\n".join(lines) or first.rstrip()
+
+
+def _byline(d: Discovery) -> str:
+    """'Nappa et al. 2015 · IEEE Symposium on ...': who, when, where."""
+    m = d.metadata
+    who = d.first_author or "unknown author"
+    if len(m.authors) > 1:
+        who += " et al."
+    parts = [f"{who} {m.year}" if m.year else who]
+    if m.container_title:
+        parts.append(" ".join(m.container_title.split()))
+    return " · ".join(parts)
+
+
+def _url(d: Discovery) -> str:
+    """A link the terminal can open: the DOI resolver, else the OpenAlex page."""
+    if d.doi:
+        return f"https://doi.org/{d.doi}"
+    return f"https://openalex.org/{d.openalex_id}"
 
 
 def render(rows: list[Discovery], cov: Coverage, args) -> None:
@@ -357,25 +377,22 @@ def render(rows: list[Discovery], cov: Coverage, args) -> None:
         f"\n{len(rows)} paper{'' if len(rows) == 1 else 's'} cited by at least "
         f"{args.min_count} of your papers but not in your collection:\n"
     )
-    width = max(shutil.get_terminal_size((110, 24)).columns, 90)
-    title_w = width - 62
-    print(
-        f"  {'#':>2}  {'cited':>5}  {'global':>7}  {'year':>4}  "
-        f"{'first author':<16}  {'venue':<20}  title"
-    )
+    # One block per suggestion. The suggested paper comes first with its full
+    # title and a link; the citekeys underneath are the user's OWN papers that
+    # cite it, labelled as such so they are not read as the suggestion.
+    width = min(max(shutil.get_terminal_size((100, 24)).columns, 60), 110)
     for i, d in enumerate(rows, 1):
-        m = d.metadata
-        print(
-            f"  {i:>2}  {d.count:>5}  {d.cited_by_count:>7,}  "
-            f"{(m.year or ''):>4}  {_clip(d.first_author, 16):<16}  "
-            f"{_clip(m.container_title or '', 20):<20}  {_clip(m.title, title_w)}"
-        )
-        print(f"      via {_via(d.citekeys, width - 60)}")
-        print(f"      {('doi ' + d.doi) if d.doi else 'openalex ' + d.openalex_id}")
+        print(_wrap(d.metadata.title or "(untitled)", width, f"  {i:>2}. ", _INDENT))
+        print(_wrap(_byline(d), width, _INDENT))
+        print(f"{_INDENT}{_url(d)}")
+        yours = "1 of your papers" if d.count == 1 else f"{d.count} of your papers"
+        print(f"{_INDENT}cited by {yours} ({d.cited_by_count:,} globally):")
+        print(_wrap(", ".join(d.citekeys), width, _INDENT + "  "))
+        print()
 
     print(
-        f"\nNot interested in one? `zobs discover --ignore "
-        f"{rows[0].doi or rows[0].openalex_id}` keeps it out of future runs."
+        f"Not interested in one? `zobs discover --ignore {_url(rows[0])}` keeps it "
+        "out of future runs (the DOI or OpenAlex id alone works too)."
     )
 
 
@@ -396,6 +413,7 @@ def as_json(rows: list[Discovery], cov: Coverage) -> str:
                     "year": d.metadata.year,
                     "venue": d.metadata.container_title,
                     "doi": d.doi or None,
+                    "url": _url(d),
                     "citedByHeld": d.count,
                     "citedByGlobal": d.cited_by_count,
                     "score": round(d.score, 4),

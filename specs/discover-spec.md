@@ -71,26 +71,37 @@ Resolved 54/61 selection items; 48 had reference data (1904 references read).
 
 25 papers cited by at least 2 of your papers but not in your collection:
 
-   #  cited   global  year  first author      venue                 title
-   1      3      614  2006  Li                IEEE Transactions o…  CP-Miner: finding copy-paste and related bugs…
-      via jangReDeBug2012, kimVUDDY2017, liVulPecker2016
-      doi 10.1109/tse.2006.28
-   2      2      119  2010  Pham                                    Detection of recurring software vulnerabilities
-      via kimVUDDY2017, liVulPecker2016
-      doi 10.1145/1858996.1859089
+   1. CP-Miner: finding copy-paste and related bugs in large-scale software code
+      Li et al. 2006 · IEEE Transactions on Software Engineering
+      https://doi.org/10.1109/tse.2006.28
+      cited by 3 of your papers (614 globally):
+        jangReDeBug2012, kimVUDDY2017, liVulPecker2016
 
-Not interested in one? `zobs discover --ignore 10.1109/tse.2006.28` keeps it
-out of future runs.
+   2. Detection of recurring software vulnerabilities
+      Pham et al. 2010
+      https://doi.org/10.1145/1858996.1859089
+      cited by 2 of your papers (119 globally):
+        kimVUDDY2017, liVulPecker2016
+
+Not interested in one? `zobs discover --ignore https://doi.org/10.1109/tse.2006.28`
+keeps it out of future runs (the DOI or OpenAlex id alone works too).
 ```
 
-`cited` is how many of the user's own papers cite this one; `global` is
-OpenAlex's `cited_by_count`. The `via` line is the point of the feature: a bare
-count is a recommendation, a count plus "these three of your papers cite it" is
-a claim the user can check in thirty seconds. When a candidate has no DOI, the
-OpenAlex id is printed instead so it can still be fed to `--ignore`.
+Each block leads with the suggested paper: full title (wrapped, never
+clipped), first author, year, venue, and a link. The link is
+`https://doi.org/<doi>`, or `https://openalex.org/<id>` when there is no DOI, so
+a terminal can open it directly and `--ignore` accepts it as printed.
+
+The "cited by N of your papers" line and the citekeys under it are the evidence,
+and the point of the feature: a bare count is a recommendation, a count plus
+"these three of your papers cite it" is a claim the user can check in thirty
+seconds. They are labelled and indented under the suggestion because an earlier
+table layout, which clipped the title and printed `via <citekey>` on the next
+line, read as if the user's own paper were the suggestion. `global` /
+"globally" is OpenAlex's `cited_by_count`.
 
 `--json` runs the same pipeline and prints the ranked results with the full
-`via` list per candidate, untruncated. Note that this differs from
+`via` list (the citing citekeys) and the `url` per candidate. Note that this differs from
 `zobs augment --json`, which deliberately makes no network calls: for discover
 the network work *is* the feature, so `--json` is a formatting choice, not a
 fast path.
@@ -147,7 +158,7 @@ comment at the constant. `--refresh` bypasses the cache exactly as in `augment`.
 
 The index is built as `openalex_id -> set of citekeys in the collection that
 reference it`, never as an integer counter. The set is the evidence, it is what
-the `via` line prints and what `--json` exports, and it costs nothing to keep.
+the "cited by" line prints and what `--json` exports as `via`, and it costs nothing to keep.
 
 A candidate must clear `--min-count` (default 2). A single citation is noise:
 every paper in the selection cites thirty things once, and the tail is mostly
